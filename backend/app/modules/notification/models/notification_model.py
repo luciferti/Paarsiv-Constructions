@@ -25,7 +25,8 @@ class Notification(UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, Base):
     recipient_phone: Mapped[str] = mapped_column(String(30), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[NotificationStatus] = mapped_column(
-        Enum(NotificationStatus, name="notification_status"), nullable=False
+        Enum(NotificationStatus, name="notification_status", values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
     )
     provider_used: Mapped[str] = mapped_column(String(50), nullable=False)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)

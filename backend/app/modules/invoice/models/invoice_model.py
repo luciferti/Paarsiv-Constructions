@@ -34,7 +34,7 @@ class Invoice(UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, Base):
     amount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
 
     status: Mapped[InvoiceStatus] = mapped_column(
-        Enum(InvoiceStatus, name="invoice_status"),
+        Enum(InvoiceStatus, name="invoice_status", values_callable=lambda obj: [e.value for e in obj]),
         nullable=False,
         default=InvoiceStatus.PENDING_REVIEW,
     )

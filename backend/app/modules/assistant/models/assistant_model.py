@@ -23,10 +23,12 @@ class AssistantMessage(UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, Base
     __tablename__ = "assistant_messages"
 
     role: Mapped[MessageRole] = mapped_column(
-        Enum(MessageRole, name="assistant_message_role"), nullable=False
+        Enum(MessageRole, name="assistant_message_role", values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
     )
     channel: Mapped[MessageChannel] = mapped_column(
-        Enum(MessageChannel, name="assistant_message_channel"), nullable=False
+        Enum(MessageChannel, name="assistant_message_channel", values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # WhatsApp sender number for channel=whatsapp; null for web.

@@ -30,7 +30,9 @@ class Material(UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMi
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
     category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     status: Mapped[MaterialStatus] = mapped_column(
-        Enum(MaterialStatus, name="material_status"), nullable=False, default=MaterialStatus.ACTIVE
+        Enum(MaterialStatus, name="material_status", values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=MaterialStatus.ACTIVE,
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
@@ -49,7 +51,8 @@ class MaterialEntry(UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, Base):
         Uuid(as_uuid=True), ForeignKey("vendors.id"), nullable=True
     )
     entry_type: Mapped[MaterialEntryType] = mapped_column(
-        Enum(MaterialEntryType, name="material_entry_type"), nullable=False
+        Enum(MaterialEntryType, name="material_entry_type", values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
     )
     quantity: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     unit_cost: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)

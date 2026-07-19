@@ -35,7 +35,9 @@ class Vendor(UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixi
 
     tax_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     status: Mapped[VendorStatus] = mapped_column(
-        Enum(VendorStatus, name="vendor_status"), nullable=False, default=VendorStatus.ACTIVE
+        Enum(VendorStatus, name="vendor_status", values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=VendorStatus.ACTIVE,
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

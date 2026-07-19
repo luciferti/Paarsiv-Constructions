@@ -39,7 +39,12 @@ class Site(UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, SoftDeleteMixin,
 
     site_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     status: Mapped[SiteStatus] = mapped_column(
-        Enum(SiteStatus, name="site_status"), nullable=False, default=SiteStatus.PLANNING
+        # values_callable stores the lowercase member VALUE (e.g. "planning"),
+        # matching the Postgres enum labels our migrations create and the JSON
+        # API. Without it SQLAlchemy would use the member NAME ("PLANNING").
+        Enum(SiteStatus, name="site_status", values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=SiteStatus.PLANNING,
     )
 
     start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
