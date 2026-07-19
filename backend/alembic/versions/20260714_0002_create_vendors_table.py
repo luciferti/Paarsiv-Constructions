@@ -18,11 +18,9 @@ down_revision: Union[str, None] = "20260714_0001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-vendor_status_enum = postgresql.ENUM("active", "inactive", "blacklisted", name="vendor_status")
-
-
 def upgrade() -> None:
-    vendor_status_enum.create(op.get_bind(), checkfirst=True)
+    # vendor_status enum created in 0000 base migration
+    vendor_status_enum = postgresql.ENUM("active", "inactive", "blacklisted", name="vendor_status")
 
     op.create_table(
         "vendors",

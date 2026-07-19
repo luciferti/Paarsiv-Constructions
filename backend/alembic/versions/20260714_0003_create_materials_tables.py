@@ -20,15 +20,12 @@ down_revision: Union[str, None] = "20260714_0002"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-material_status_enum = postgresql.ENUM("active", "inactive", name="material_status")
-material_entry_type_enum = postgresql.ENUM(
-    "received", "used", "adjustment", name="material_entry_type"
-)
-
-
 def upgrade() -> None:
-    material_status_enum.create(op.get_bind(), checkfirst=True)
-    material_entry_type_enum.create(op.get_bind(), checkfirst=True)
+    # material_status & material_entry_type enums created in 0000 base migration
+    material_status_enum = postgresql.ENUM("active", "inactive", name="material_status")
+    material_entry_type_enum = postgresql.ENUM(
+        "received", "used", "adjustment", name="material_entry_type"
+    )
 
     op.create_table(
         "materials",

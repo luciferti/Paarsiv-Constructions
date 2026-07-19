@@ -21,8 +21,26 @@ down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+# Pre-create all enum types to avoid duplicate-type errors in later migrations
+site_status_enum = postgresql.ENUM("planning", "active", "on_hold", "completed", "archived", name="site_status")
+vendor_status_enum = postgresql.ENUM("active", "inactive", "blacklisted", name="vendor_status")
+material_status_enum = postgresql.ENUM("active", "inactive", name="material_status")
+material_entry_type_enum = postgresql.ENUM("received", "used", "adjustment", name="material_entry_type")
+invoice_status_enum = postgresql.ENUM("pending_review", "approved", "rejected", name="invoice_status")
+notification_status_enum = postgresql.ENUM("sent", "logged", "failed", name="notification_status")
+assistant_message_role_enum = postgresql.ENUM("user", "assistant", name="assistant_message_role")
+assistant_message_channel_enum = postgresql.ENUM("web", "whatsapp", name="assistant_message_channel")
+
 
 def upgrade() -> None:
+    site_status_enum.create(op.get_bind(), checkfirst=True)
+    vendor_status_enum.create(op.get_bind(), checkfirst=True)
+    material_status_enum.create(op.get_bind(), checkfirst=True)
+    material_entry_type_enum.create(op.get_bind(), checkfirst=True)
+    invoice_status_enum.create(op.get_bind(), checkfirst=True)
+    notification_status_enum.create(op.get_bind(), checkfirst=True)
+    assistant_message_role_enum.create(op.get_bind(), checkfirst=True)
+    assistant_message_channel_enum.create(op.get_bind(), checkfirst=True)
     op.create_table(
         "organizations",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),

@@ -21,13 +21,9 @@ down_revision: Union[str, None] = "20260714_0000"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-site_status_enum = postgresql.ENUM(
-    "planning", "active", "on_hold", "completed", "archived", name="site_status"
-)
-
-
 def upgrade() -> None:
-    site_status_enum.create(op.get_bind(), checkfirst=True)
+    # site_status enum created in 0000 base migration
+    site_status_enum = postgresql.ENUM("planning", "active", "on_hold", "completed", "archived", name="site_status")
 
     op.create_table(
         "sites",
