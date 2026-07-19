@@ -17,10 +17,10 @@ down_revision: Union[str, None] = "20260714_0006"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-notification_status_enum = postgresql.ENUM("sent", "logged", "failed", name="notification_status")
-
 
 def upgrade() -> None:
+    # notification_status enum created in 0000 base migration
+    notification_status_enum = postgresql.ENUM("sent", "logged", "failed", name="notification_status")
 
     op.create_table(
         "notifications",
@@ -42,4 +42,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("notifications")
-    # notification_status enum dropped in 0000 downgrade

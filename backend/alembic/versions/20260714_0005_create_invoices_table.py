@@ -17,12 +17,12 @@ down_revision: Union[str, None] = "20260714_0004"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-invoice_status_enum = postgresql.ENUM(
-    "pending_review", "approved", "rejected", name="invoice_status"
-)
-
 
 def upgrade() -> None:
+    # invoice_status enum created in 0000 base migration
+    invoice_status_enum = postgresql.ENUM(
+        "pending_review", "approved", "rejected", name="invoice_status"
+    )
 
     op.create_table(
         "invoices",
@@ -48,4 +48,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("invoices")
-    # invoice_status enum dropped in 0000 downgrade

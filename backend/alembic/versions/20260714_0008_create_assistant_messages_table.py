@@ -17,11 +17,11 @@ down_revision: Union[str, None] = "20260714_0007"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-role_enum = postgresql.ENUM("user", "assistant", name="assistant_message_role")
-channel_enum = postgresql.ENUM("web", "whatsapp", name="assistant_message_channel")
-
 
 def upgrade() -> None:
+    # assistant enums created in 0000 base migration
+    role_enum = postgresql.ENUM("user", "assistant", name="assistant_message_role")
+    channel_enum = postgresql.ENUM("web", "whatsapp", name="assistant_message_channel")
 
     op.create_table(
         "assistant_messages",
@@ -40,4 +40,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("assistant_messages")
-    # assistant message enums dropped in 0000 downgrade

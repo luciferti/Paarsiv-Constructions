@@ -80,3 +80,12 @@ def downgrade() -> None:
     op.drop_table("employees")
     op.drop_table("users")
     op.drop_table("organizations")
+    # Enums are dropped last to avoid FK constraint issues
+    site_status_enum.drop(op.get_bind(), checkfirst=True)
+    vendor_status_enum.drop(op.get_bind(), checkfirst=True)
+    material_status_enum.drop(op.get_bind(), checkfirst=True)
+    material_entry_type_enum.drop(op.get_bind(), checkfirst=True)
+    invoice_status_enum.drop(op.get_bind(), checkfirst=True)
+    notification_status_enum.drop(op.get_bind(), checkfirst=True)
+    assistant_message_role_enum.drop(op.get_bind(), checkfirst=True)
+    assistant_message_channel_enum.drop(op.get_bind(), checkfirst=True)
