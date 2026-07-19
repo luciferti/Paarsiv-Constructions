@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+node_modules/
+.next/
+
+# Env & local data — never commit secrets
+.env
+.env.local
+*.db
+uploads/
+
+# OS / editors
+.DS_Store
+.claude/
+Shopify-Product-API.postman_collection.json
