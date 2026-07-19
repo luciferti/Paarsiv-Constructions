@@ -20,7 +20,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # notification_status enum created in 0000 base migration
-    notification_status_enum = postgresql.ENUM("sent", "logged", "failed", name="notification_status")
+    notification_status_enum = postgresql.ENUM(
+        "sent", "logged", "failed", name="notification_status", create_type=False
+    )
 
     op.create_table(
         "notifications",

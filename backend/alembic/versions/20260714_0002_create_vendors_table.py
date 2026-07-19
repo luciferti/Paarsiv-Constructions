@@ -21,7 +21,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # vendor_status enum created in 0000 base migration
-    vendor_status_enum = postgresql.ENUM("active", "inactive", "blacklisted", name="vendor_status")
+    vendor_status_enum = postgresql.ENUM(
+        "active", "inactive", "blacklisted", name="vendor_status", create_type=False
+    )
 
     op.create_table(
         "vendors",

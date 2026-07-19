@@ -32,15 +32,32 @@ assistant_message_role_enum = postgresql.ENUM("user", "assistant", name="assista
 assistant_message_channel_enum = postgresql.ENUM("web", "whatsapp", name="assistant_message_channel")
 
 
+def _create_enum_if_absent(name: str, values: Sequence[str]) -> None:
+    labels = ", ".join(f"'{v}'" for v in values)
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{name}') THEN
+                CREATE TYPE {name} AS ENUM ({labels});
+            END IF;
+        END
+        $$;
+        """
+    )
+
+
 def upgrade() -> None:
-    site_status_enum.create(op.get_bind(), checkfirst=True)
-    vendor_status_enum.create(op.get_bind(), checkfirst=True)
-    material_status_enum.create(op.get_bind(), checkfirst=True)
-    material_entry_type_enum.create(op.get_bind(), checkfirst=True)
-    invoice_status_enum.create(op.get_bind(), checkfirst=True)
-    notification_status_enum.create(op.get_bind(), checkfirst=True)
-    assistant_message_role_enum.create(op.get_bind(), checkfirst=True)
-    assistant_message_channel_enum.create(op.get_bind(), checkfirst=True)
+    # PostgreSQL lacks CREATE TYPE ... IF NOT EXISTS, so guard each enum
+    # with a DO block that checks pg_type. Idempotent across re-runs.
+    _create_enum_if_absent("site_status", ["planning", "active", "on_hold", "completed", "archived"])
+    _create_enum_if_absent("vendor_status", ["active", "inactive", "blacklisted"])
+    _create_enum_if_absent("material_status", ["active", "inactive"])
+    _create_enum_if_absent("material_entry_type", ["received", "used", "adjustment"])
+    _create_enum_if_absent("invoice_status", ["pending_review", "approved", "rejected"])
+    _create_enum_if_absent("notification_status", ["sent", "logged", "failed"])
+    _create_enum_if_absent("assistant_message_role", ["user", "assistant"])
+    _create_enum_if_absent("assistant_message_channel", ["web", "whatsapp"])
     op.create_table(
         "organizations",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),

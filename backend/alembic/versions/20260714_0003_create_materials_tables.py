@@ -23,9 +23,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # material_status & material_entry_type enums created in 0000 base migration
-    material_status_enum = postgresql.ENUM("active", "inactive", name="material_status")
+    material_status_enum = postgresql.ENUM(
+        "active", "inactive", name="material_status", create_type=False
+    )
     material_entry_type_enum = postgresql.ENUM(
-        "received", "used", "adjustment", name="material_entry_type"
+        "received", "used", "adjustment", name="material_entry_type", create_type=False
     )
 
     op.create_table(

@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # invoice_status enum created in 0000 base migration
     invoice_status_enum = postgresql.ENUM(
-        "pending_review", "approved", "rejected", name="invoice_status"
+        "pending_review", "approved", "rejected", name="invoice_status", create_type=False
     )
 
     op.create_table(

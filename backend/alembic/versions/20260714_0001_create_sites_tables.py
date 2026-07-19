@@ -23,9 +23,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # site_status enum created in 0000 base migration
+    # site_status enum created in 0000 base migration; create_type=False
+    # prevents create_table from auto-emitting a duplicate CREATE TYPE.
     site_status_enum = postgresql.ENUM(
-        "planning", "active", "on_hold", "completed", "archived", name="site_status"
+        "planning", "active", "on_hold", "completed", "archived",
+        name="site_status", create_type=False,
     )
 
     op.create_table(
