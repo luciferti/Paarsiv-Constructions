@@ -11,12 +11,11 @@ Never imported unless `settings.demo_mode` is true.
 import importlib
 import pkgutil
 
-from sqlalchemy import Column, Table, Uuid
-
 from app.core.database import Base, engine
 
-employees = Table("employees", Base.metadata, Column("id", Uuid(as_uuid=True), primary_key=True))
-projects = Table("projects", Base.metadata, Column("id", Uuid(as_uuid=True), primary_key=True))
+# Registers the employees/projects stub tables in the metadata. Imported for
+# its side effect; also used in production (see app.main) so FKs resolve there.
+import app.core.hrms_stubs  # noqa: F401
 
 
 def _register_all_models() -> None:

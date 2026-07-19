@@ -12,6 +12,11 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError, UnauthorizedError
 
+# Side-effect import: registers the HRMS `employees`/`projects` stub tables in
+# the ORM metadata so feature models' foreign keys resolve in every environment
+# (not just demo mode). Must run before the first query configures the mappers.
+import app.core.hrms_stubs  # noqa: F401,E402
+
 settings = get_settings()
 
 
@@ -79,18 +84,6 @@ def handle_conflict(request: Request, exc: Exception) -> JSONResponse:
 @app.exception_handler(UnauthorizedError)
 def handle_unauthorized(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=401, content={"detail": str(exc)})
-
-
-import traceback as _traceback
-
-
-# TEMPORARY diagnostic — remove after pinpointing the site-create 500.
-@app.exception_handler(Exception)
-def _debug_unhandled(request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(
-        status_code=500,
-        content={"error": repr(exc), "trace": _traceback.format_exc().splitlines()[-14:]},
-    )
 
 
 @app.get("/health")
