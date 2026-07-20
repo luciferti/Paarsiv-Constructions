@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.modules.invoice.models.invoice_model import Invoice, InvoiceStatus
+from app.modules.labour.models.labour_model import AttendanceEntry, Worker
 from app.modules.material.models.material_model import Material, MaterialEntry, MaterialEntryType
 from app.modules.material.services.material_service import MaterialEntryService
 from app.modules.report.models.report_model import DailyReport
@@ -98,6 +99,16 @@ class AssistantContext:
         stmt = select(Vendor).where(Vendor.org_id == self.org_id, Vendor.is_deleted.is_(False))
         return list(self.db.execute(stmt).scalars().all())
 
+    def workers(self) -> List[Worker]:
+        stmt = select(Worker).where(Worker.org_id == self.org_id, Worker.is_deleted.is_(False))
+        return list(self.db.execute(stmt).scalars().all())
+
+    def labour_wage_total(self) -> float:
+        stmt = select(func.coalesce(func.sum(AttendanceEntry.wage_amount), 0)).where(
+            AttendanceEntry.org_id == self.org_id
+        )
+        return float(self.db.execute(stmt).scalar_one())
+
 
 def build_org_snapshot(context: AssistantContext) -> str:
     """Compact plain-text snapshot of the org's live data, shared by the
@@ -132,6 +143,13 @@ def build_org_snapshot(context: AssistantContext) -> str:
             lines.append(
                 f"- {site.name}: {item.material_name} {_fmt(item.quantity_on_hand)} {item.unit} on hand"
             )
+
+    workers = context.workers()
+    lines.append(f"LABOUR ({len(workers)} workers):")
+    for w in workers[:20]:
+        trade = f" {w.trade}" if w.trade else ""
+        lines.append(f"- {w.code} {w.name}{trade} @ {_fmt(float(w.default_wage_rate))}/day")
+    lines.append(f"LABOUR WAGES RECORDED: {_fmt(context.labour_wage_total())}")
 
     counts = context.invoice_counts()
     lines.append(f"INVOICES: {sum(counts.values())} total, by status: {counts or 'none'}")
@@ -169,6 +187,7 @@ _W = {
     "invoice": {"invoice", "invoices", "bill", "bills", "payment"},
     "vendor": {"vendor", "vendors", "vender", "venders", "venoder", "venoders", "supplier", "suppliers"},
     "site": {"site", "sites", "project", "projects"},
+    "labour": {"labour", "labor", "labourer", "labourers", "worker", "workers", "mazdoor", "mazdur", "majdoor", "attendance", "haziri", "hazri", "muster", "wage", "wages", "dihaadi", "dihadi", "majduri", "mazduri"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -183,6 +202,7 @@ CREATE_GUIDES = [
     ("vendor", "vendor", "I can't create records myself — I only read your data. To add a vendor: Vendors page → \"+ New Vendor\"."),
     ("material", "material", "I can't create records myself — I only read your data. To add a material: Materials page → \"+ New Material\". To log stock in/out: open a site → Materials tab → Log Entry."),
     ("report", "report", "I can't create records myself — I only read your data. To log a daily report: open a site → Reports tab → Log Report."),
+    ("labour", "labour", "I can't create records myself — I only read your data. To add a worker: Workers page → \"+ New Worker\". To mark attendance: open a site → Labour tab → Mark Attendance."),
 ]
 
 
@@ -199,7 +219,7 @@ class RuleBasedAnswerProvider(AnswerProvider):
                     return guide
 
         domains: Set[str] = {
-            key for key in ("site", "vendor", "material", "invoice", "report", "stock", "issue")
+            key for key in ("site", "vendor", "material", "invoice", "report", "stock", "issue", "labour")
             if _has(q, key)
         }
 
@@ -207,6 +227,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "labour"):
+            return self._answer_labour(context)
         if _has(q, "issue"):
             return self._answer_issues(context)
         if _has(q, "stock") or (_has(q, "material") and not _has(q, "price")):
@@ -265,6 +287,15 @@ class RuleBasedAnswerProvider(AnswerProvider):
             parts.append("")
             parts.append(f"MATERIAL SPEND (from logged entries): {_fmt(spend)}")
 
+        workers = context.workers()
+        if workers:
+            wages = context.labour_wage_total()
+            parts.append("")
+            parts.append(
+                f"LABOUR: {len(workers)} worker(s)"
+                + (f", wages recorded ₹{_fmt(wages)}" if wages > 0 else "")
+            )
+
         counts = context.invoice_counts()
         parts.append("")
         parts.append(
@@ -294,6 +325,21 @@ class RuleBasedAnswerProvider(AnswerProvider):
             return "No vendors yet. Add one from the Vendors page."
         listing = "\n".join(f"• {v.code} {v.name} [{v.status.value}]" for v in vendors[:10])
         return f"You have {len(vendors)} vendor(s):\n{listing}"
+
+    def _answer_labour(self, context: AssistantContext) -> str:
+        workers = context.workers()
+        if not workers:
+            return "No workers on the roster yet. Add one from the Workers page, then mark attendance on a site's Labour tab."
+        active = [w for w in workers if w.status.value == "active"]
+        listing = "\n".join(
+            f"• {w.code} {w.name}"
+            + (f" — {w.trade}" if w.trade else "")
+            + f" (₹{_fmt(float(w.default_wage_rate))}/day)"
+            for w in workers[:15]
+        )
+        wages = context.labour_wage_total()
+        tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
+        return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
 
     def _answer_invoices(self, context: AssistantContext) -> str:
         counts = context.invoice_counts()

@@ -10,6 +10,7 @@ import { clearSession, getUser, SessionUser } from "@/lib/auth/session";
 const NAV_LINKS = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Sites", href: "/sites" },
+  { label: "Workers", href: "/workers" },
   { label: "Vendors", href: "/vendors" },
   { label: "Materials", href: "/materials" },
   { label: "Invoices", href: "/invoices" },
