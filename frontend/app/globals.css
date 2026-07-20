@@ -388,6 +388,43 @@ h3 {
   cursor: not-allowed;
 }
 
+.button-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--ink);
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.button-secondary:hover {
+  background: var(--paper-2, rgba(0, 0, 0, 0.03));
+  border-color: var(--navy);
+}
+
+.link-danger {
+  background: transparent;
+  border: none;
+  color: #c0392b;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.link-danger:disabled {
+  color: var(--border-strong);
+  cursor: not-allowed;
+}
+
 /* ---------- Filter pills ---------- */
 
 .sites-filters {

@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { label: "Workers", href: "/workers" },
   { label: "Vendors", href: "/vendors" },
   { label: "Materials", href: "/materials" },
+  { label: "Purchase Orders", href: "/purchase-orders" },
   { label: "Invoices", href: "/invoices" },
   { label: "Notifications", href: "/notifications" },
 ];

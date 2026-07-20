@@ -30,6 +30,7 @@ from app.modules.invoice.models.invoice_model import Invoice, InvoiceStatus
 from app.modules.labour.models.labour_model import AttendanceEntry, Worker
 from app.modules.material.models.material_model import Material, MaterialEntry, MaterialEntryType
 from app.modules.material.services.material_service import MaterialEntryService
+from app.modules.purchase.models.po_model import POStatus, PurchaseOrder
 from app.modules.report.models.report_model import DailyReport
 from app.modules.site.models.site_model import Site
 from app.modules.vendor.models.vendor_model import Vendor
@@ -109,6 +110,21 @@ class AssistantContext:
         )
         return float(self.db.execute(stmt).scalar_one())
 
+    def purchase_orders(self) -> List[PurchaseOrder]:
+        stmt = select(PurchaseOrder).where(
+            PurchaseOrder.org_id == self.org_id, PurchaseOrder.is_deleted.is_(False)
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
+    def po_open_count(self) -> int:
+        open_states = (POStatus.DRAFT, POStatus.SENT, POStatus.PARTIALLY_RECEIVED)
+        stmt = select(func.count()).select_from(PurchaseOrder).where(
+            PurchaseOrder.org_id == self.org_id,
+            PurchaseOrder.is_deleted.is_(False),
+            PurchaseOrder.status.in_(open_states),
+        )
+        return int(self.db.execute(stmt).scalar_one())
+
 
 def build_org_snapshot(context: AssistantContext) -> str:
     """Compact plain-text snapshot of the org's live data, shared by the
@@ -151,6 +167,12 @@ def build_org_snapshot(context: AssistantContext) -> str:
         lines.append(f"- {w.code} {w.name}{trade} @ {_fmt(float(w.default_wage_rate))}/day")
     lines.append(f"LABOUR WAGES RECORDED: {_fmt(context.labour_wage_total())}")
 
+    pos = context.purchase_orders()
+    lines.append(f"PURCHASE ORDERS ({len(pos)} total, {context.po_open_count()} open):")
+    for p in pos[:15]:
+        total = sum(float(ln.quantity) * float(ln.unit_price) for ln in p.lines)
+        lines.append(f"- {p.po_number} [{p.status.value}] {_fmt(total)}")
+
     counts = context.invoice_counts()
     lines.append(f"INVOICES: {sum(counts.values())} total, by status: {counts or 'none'}")
     lines.append(f"MATERIAL SPEND (received entries with a unit cost): {_fmt(context.material_spend())}")
@@ -188,6 +210,7 @@ _W = {
     "vendor": {"vendor", "vendors", "vender", "venders", "venoder", "venoders", "supplier", "suppliers"},
     "site": {"site", "sites", "project", "projects"},
     "labour": {"labour", "labor", "labourer", "labourers", "worker", "workers", "mazdoor", "mazdur", "majdoor", "attendance", "haziri", "hazri", "muster", "wage", "wages", "dihaadi", "dihadi", "majduri", "mazduri"},
+    "po": {"purchase order", "purchase orders", "purchase", " po ", " pos ", "p.o", "khareed", "kharid"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -203,6 +226,7 @@ CREATE_GUIDES = [
     ("material", "material", "I can't create records myself — I only read your data. To add a material: Materials page → \"+ New Material\". To log stock in/out: open a site → Materials tab → Log Entry."),
     ("report", "report", "I can't create records myself — I only read your data. To log a daily report: open a site → Reports tab → Log Report."),
     ("labour", "labour", "I can't create records myself — I only read your data. To add a worker: Workers page → \"+ New Worker\". To mark attendance: open a site → Labour tab → Mark Attendance."),
+    ("po", "po", "I can't create records myself — I only read your data. To raise a purchase order: Purchase Orders page → \"+ New PO\", pick the vendor and add line items."),
 ]
 
 
@@ -219,7 +243,7 @@ class RuleBasedAnswerProvider(AnswerProvider):
                     return guide
 
         domains: Set[str] = {
-            key for key in ("site", "vendor", "material", "invoice", "report", "stock", "issue", "labour")
+            key for key in ("site", "vendor", "material", "invoice", "report", "stock", "issue", "labour", "po")
             if _has(q, key)
         }
 
@@ -227,6 +251,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "po"):
+            return self._answer_purchase_orders(context)
         if _has(q, "labour"):
             return self._answer_labour(context)
         if _has(q, "issue"):
@@ -296,6 +322,11 @@ class RuleBasedAnswerProvider(AnswerProvider):
                 + (f", wages recorded ₹{_fmt(wages)}" if wages > 0 else "")
             )
 
+        pos = context.purchase_orders()
+        if pos:
+            parts.append("")
+            parts.append(f"PURCHASE ORDERS: {len(pos)} total, {context.po_open_count()} open")
+
         counts = context.invoice_counts()
         parts.append("")
         parts.append(
@@ -340,6 +371,27 @@ class RuleBasedAnswerProvider(AnswerProvider):
         wages = context.labour_wage_total()
         tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
         return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
+
+    def _answer_purchase_orders(self, context: AssistantContext) -> str:
+        pos = context.purchase_orders()
+        if not pos:
+            return "No purchase orders yet. Raise one from the Purchase Orders page → + New PO."
+        vendor_name = {v.id: v.name for v in context.vendors()}
+
+        def po_total(po) -> float:
+            return sum(float(line.quantity) * float(line.unit_price) for line in po.lines)
+
+        grand = sum(po_total(p) for p in pos)
+        open_n = context.po_open_count()
+        listing = "\n".join(
+            f"• {p.po_number} — {vendor_name.get(p.vendor_id, 'vendor')} "
+            f"[{p.status.value.replace('_', ' ')}] ₹{_fmt(po_total(p))}"
+            for p in pos[:12]
+        )
+        return (
+            f"You have {len(pos)} purchase order(s), {open_n} still open:\n{listing}"
+            f"\n\nTotal ordered value: ₹{_fmt(grand)}"
+        )
 
     def _answer_invoices(self, context: AssistantContext) -> str:
         counts = context.invoice_counts()
