@@ -42,11 +42,28 @@ settings = get_settings()
 
 
 def _fmt(value) -> str:
-    """200.0 -> 200, 12.5 -> 12.5"""
+    """Readable amount with Indian digit grouping, no scientific notation.
+    200.0 -> '200', 12.5 -> '12.5', 1000000 -> '10,00,000'."""
     try:
-        return f"{float(value):g}"
+        num = round(float(value), 2)
     except (TypeError, ValueError):
         return str(value)
+    neg = num < 0
+    num = abs(num)
+    whole = int(num)
+    frac = round(num - whole, 2)
+    s = str(whole)
+    if len(s) > 3:  # Indian grouping: last 3 digits, then pairs
+        head, tail = s[:-3], s[-3:]
+        groups = []
+        while len(head) > 2:
+            groups.insert(0, head[-2:])
+            head = head[:-2]
+        groups.insert(0, head)
+        s = ",".join(groups) + "," + tail
+    if frac > 0:
+        s += f"{frac:.2f}"[1:].rstrip("0").rstrip(".")
+    return ("-" if neg else "") + s
 
 
 class AssistantContext:
