@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.modules.budget.services.budget_service import BudgetService
+from app.modules.expense.services.expense_service import ExpenseService
 from app.modules.invoice.models.invoice_model import Invoice, InvoiceStatus
 from app.modules.labour.models.labour_model import AttendanceEntry, Worker
 from app.modules.material.models.material_model import Material, MaterialEntry, MaterialEntryType
@@ -119,6 +120,9 @@ class AssistantContext:
 
     def budget_summary_for_site(self, site_id: uuid.UUID):
         return BudgetService(self.db).summary(self.org_id, site_id)
+
+    def petty_cash_summary(self):
+        return ExpenseService(self.db).summary(self.org_id)
 
     def po_open_count(self) -> int:
         open_states = (POStatus.DRAFT, POStatus.SENT, POStatus.PARTIALLY_RECEIVED)
@@ -216,6 +220,7 @@ _W = {
     "labour": {"labour", "labor", "labourer", "labourers", "worker", "workers", "mazdoor", "mazdur", "majdoor", "attendance", "haziri", "hazri", "muster", "wage", "wages", "dihaadi", "dihadi", "majduri", "mazduri"},
     "po": {"purchase order", "purchase orders", "purchase", " po ", " pos ", "p.o", "khareed", "kharid"},
     "budget": {"budget", "budgeted", "boq", "bajat", "over budget", "under budget", "cost overrun", "variance"},
+    "cash": {"petty cash", "pettycash", "cash", "expense", "expenses", "cash balance", "float", "imprest", "topup", "top up"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -232,6 +237,7 @@ CREATE_GUIDES = [
     ("report", "report", "I can't create records myself — I only read your data. To log a daily report: open a site → Reports tab → Log Report."),
     ("labour", "labour", "I can't create records myself — I only read your data. To add a worker: Workers page → \"+ New Worker\". To mark attendance: open a site → Labour tab → Mark Attendance."),
     ("po", "po", "I can't create records myself — I only read your data. To raise a purchase order: Purchase Orders page → \"+ New PO\", pick the vendor and add line items."),
+    ("cash", "cash", "I can't create records myself — I only read your data. To log petty cash: Petty Cash page → add a top-up or an expense with its category."),
 ]
 
 
@@ -256,6 +262,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "cash"):
+            return self._answer_petty_cash(context)
         if _has(q, "budget"):
             return self._answer_budget(context)
         if _has(q, "po"):
@@ -378,6 +386,20 @@ class RuleBasedAnswerProvider(AnswerProvider):
         wages = context.labour_wage_total()
         tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
         return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
+
+    def _answer_petty_cash(self, context: AssistantContext) -> str:
+        s = context.petty_cash_summary()
+        if s.total_topup == 0 and s.total_expense == 0:
+            return "No petty-cash activity yet. Log top-ups and expenses from the Petty Cash page."
+        parts = [
+            f"Petty cash balance: ₹{_fmt(s.balance)}",
+            f"(topped up ₹{_fmt(s.total_topup)}, spent ₹{_fmt(s.total_expense)})",
+        ]
+        if s.expense_by_category:
+            parts.append("")
+            parts.append("Top spend categories:")
+            parts.extend(f"• {row.category}: ₹{_fmt(row.amount)}" for row in s.expense_by_category[:5])
+        return "\n".join(parts)
 
     def _answer_budget(self, context: AssistantContext) -> str:
         sites = context.sites()

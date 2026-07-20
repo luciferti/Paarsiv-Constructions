@@ -15,6 +15,7 @@ const NAV_LINKS = [
   { label: "Materials", href: "/materials" },
   { label: "Purchase Orders", href: "/purchase-orders" },
   { label: "Invoices", href: "/invoices" },
+  { label: "Petty Cash", href: "/petty-cash" },
   { label: "Notifications", href: "/notifications" },
 ];
 
