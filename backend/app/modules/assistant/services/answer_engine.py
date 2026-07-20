@@ -26,6 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.modules.billing.services.billing_service import BillingService
 from app.modules.budget.services.budget_service import BudgetService
 from app.modules.expense.services.expense_service import ExpenseService
 from app.modules.invoice.models.invoice_model import Invoice, InvoiceStatus
@@ -124,6 +125,9 @@ class AssistantContext:
     def petty_cash_summary(self):
         return ExpenseService(self.db).summary(self.org_id)
 
+    def client_billing_summary(self):
+        return BillingService(self.db).summary(self.org_id)
+
     def po_open_count(self) -> int:
         open_states = (POStatus.DRAFT, POStatus.SENT, POStatus.PARTIALLY_RECEIVED)
         stmt = select(func.count()).select_from(PurchaseOrder).where(
@@ -221,6 +225,7 @@ _W = {
     "po": {"purchase order", "purchase orders", "purchase", " po ", " pos ", "p.o", "khareed", "kharid"},
     "budget": {"budget", "budgeted", "boq", "bajat", "over budget", "under budget", "cost overrun", "variance"},
     "cash": {"petty cash", "pettycash", "cash", "expense", "expenses", "cash balance", "float", "imprest", "topup", "top up"},
+    "billing": {"ra bill", "ra bills", "client bill", "client bills", "billing", "billed", "client payment", "receivable", "outstanding from client", "running account"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -238,6 +243,7 @@ CREATE_GUIDES = [
     ("labour", "labour", "I can't create records myself — I only read your data. To add a worker: Workers page → \"+ New Worker\". To mark attendance: open a site → Labour tab → Mark Attendance."),
     ("po", "po", "I can't create records myself — I only read your data. To raise a purchase order: Purchase Orders page → \"+ New PO\", pick the vendor and add line items."),
     ("cash", "cash", "I can't create records myself — I only read your data. To log petty cash: Petty Cash page → add a top-up or an expense with its category."),
+    ("billing", "billing", "I can't create records myself — I only read your data. To raise a client RA bill: Client Bills page → \"+ New Bill\", pick the site and enter the gross value and deductions."),
 ]
 
 
@@ -262,6 +268,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "billing"):
+            return self._answer_billing(context)
         if _has(q, "cash"):
             return self._answer_petty_cash(context)
         if _has(q, "budget"):
@@ -386,6 +394,18 @@ class RuleBasedAnswerProvider(AnswerProvider):
         wages = context.labour_wage_total()
         tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
         return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
+
+    def _answer_billing(self, context: AssistantContext) -> str:
+        s = context.client_billing_summary()
+        if s.bill_count == 0:
+            return "No client RA bills yet. Raise one from the Client Bills page → + New Bill."
+        return (
+            f"Client billing across {s.bill_count} RA bill(s):\n"
+            f"• Gross billed: ₹{_fmt(s.total_gross)}\n"
+            f"• Net (after retention/TDS): ₹{_fmt(s.total_net)}\n"
+            f"• Received (paid): ₹{_fmt(s.total_paid)}\n"
+            f"• Outstanding from client: ₹{_fmt(s.total_outstanding)}"
+        )
 
     def _answer_petty_cash(self, context: AssistantContext) -> str:
         s = context.petty_cash_summary()
