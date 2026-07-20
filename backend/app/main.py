@@ -86,18 +86,6 @@ def handle_unauthorized(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=401, content={"detail": str(exc)})
 
 
-import traceback as _traceback
-
-
-# TEMPORARY diagnostic — remove after pinpointing the petty-cash summary 500.
-@app.exception_handler(Exception)
-def _debug_unhandled(request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(
-        status_code=500,
-        content={"error": repr(exc), "trace": _traceback.format_exc().splitlines()[-16:]},
-    )
-
-
 @app.get("/health")
 def health_check() -> dict:
     return {"status": "ok"}

@@ -60,13 +60,16 @@ class ExpenseRepository:
         ]
         if site_id is not None:
             conditions.append(CashEntry.site_id == site_id)
+        # Group by the raw column (Postgres rejects grouping by a parameterized
+        # coalesce expression); coalesce for display only, since it is derived
+        # from the grouped column.
         stmt = (
             select(
                 func.coalesce(CashEntry.category, "Uncategorized").label("category"),
                 func.coalesce(func.sum(CashEntry.amount), 0).label("amount"),
             )
             .where(*conditions)
-            .group_by(func.coalesce(CashEntry.category, "Uncategorized"))
+            .group_by(CashEntry.category)
             .order_by(func.sum(CashEntry.amount).desc())
         )
         return [dict(row) for row in self.db.execute(stmt).mappings().all()]
