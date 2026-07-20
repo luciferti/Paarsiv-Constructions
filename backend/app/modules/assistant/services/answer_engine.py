@@ -36,6 +36,7 @@ from app.modules.material.services.material_service import MaterialEntryService
 from app.modules.purchase.models.po_model import POStatus, PurchaseOrder
 from app.modules.report.models.report_model import DailyReport
 from app.modules.site.models.site_model import Site
+from app.modules.subcontract.models.subcontract_model import Subcontractor, WorkOrder, WorkOrderStatus
 from app.modules.vendor.models.vendor_model import Vendor
 
 settings = get_settings()
@@ -145,6 +146,21 @@ class AssistantContext:
     def client_billing_summary(self):
         return BillingService(self.db).summary(self.org_id)
 
+    def work_orders(self) -> List[WorkOrder]:
+        stmt = (
+            select(WorkOrder)
+            .where(WorkOrder.org_id == self.org_id, WorkOrder.is_deleted.is_(False))
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
+    def subcontractor_names(self) -> dict:
+        subs = self.db.execute(
+            select(Subcontractor).where(
+                Subcontractor.org_id == self.org_id, Subcontractor.is_deleted.is_(False)
+            )
+        ).scalars().all()
+        return {s.id: s.name for s in subs}
+
     def po_open_count(self) -> int:
         open_states = (POStatus.DRAFT, POStatus.SENT, POStatus.PARTIALLY_RECEIVED)
         stmt = select(func.count()).select_from(PurchaseOrder).where(
@@ -243,6 +259,7 @@ _W = {
     "budget": {"budget", "budgeted", "boq", "bajat", "over budget", "under budget", "cost overrun", "variance"},
     "cash": {"petty cash", "pettycash", "cash", "expense", "expenses", "cash balance", "float", "imprest", "topup", "top up"},
     "billing": {"ra bill", "ra bills", "client bill", "client bills", "billing", "billed", "client payment", "receivable", "outstanding from client", "running account"},
+    "subcontract": {"subcontractor", "subcontractors", "sub-contractor", "subcon", "subbie", "work order", "work orders", "workorder", "petty contractor", "thekedar", "theka"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -261,6 +278,7 @@ CREATE_GUIDES = [
     ("po", "po", "I can't create records myself — I only read your data. To raise a purchase order: Purchase Orders page → \"+ New PO\", pick the vendor and add line items."),
     ("cash", "cash", "I can't create records myself — I only read your data. To log petty cash: Petty Cash page → add a top-up or an expense with its category."),
     ("billing", "billing", "I can't create records myself — I only read your data. To raise a client RA bill: Client Bills page → \"+ New Bill\", pick the site and enter the gross value and deductions."),
+    ("subcontract", "subcontract", "I can't create records myself — I only read your data. To add a subcontractor: Subcontractors page → \"+ New\". To raise a work order: Work Orders page → \"+ New WO\"."),
 ]
 
 
@@ -285,6 +303,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "subcontract"):
+            return self._answer_subcontract(context)
         if _has(q, "billing"):
             return self._answer_billing(context)
         if _has(q, "cash"):
@@ -411,6 +431,30 @@ class RuleBasedAnswerProvider(AnswerProvider):
         wages = context.labour_wage_total()
         tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
         return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
+
+    def _answer_subcontract(self, context: AssistantContext) -> str:
+        wos = context.work_orders()
+        if not wos:
+            return "No work orders yet. Add a subcontractor, then raise a work order from the Work Orders page."
+        names = context.subcontractor_names()
+
+        def paid(wo) -> float:
+            return sum(float(p.amount) for p in wo.payments)
+
+        total_value = sum(float(w.wo_value) for w in wos)
+        total_paid = sum(paid(w) for w in wos)
+        open_n = sum(1 for w in wos if w.status.value in ("open", "in_progress"))
+        listing = "\n".join(
+            f"• {w.wo_number} — {names.get(w.subcontractor_id, 'subcontractor')} "
+            f"[{w.status.value.replace('_', ' ')}, {_fmt(float(w.progress_percent))}%] "
+            f"₹{_fmt(float(w.wo_value))} (paid ₹{_fmt(paid(w))})"
+            for w in wos[:12]
+        )
+        return (
+            f"You have {len(wos)} work order(s), {open_n} active:\n{listing}"
+            f"\n\nTotal WO value ₹{_fmt(total_value)}, paid ₹{_fmt(total_paid)}, "
+            f"balance ₹{_fmt(total_value - total_paid)}"
+        )
 
     def _answer_billing(self, context: AssistantContext) -> str:
         s = context.client_billing_summary()
