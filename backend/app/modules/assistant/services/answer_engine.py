@@ -26,6 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.modules.budget.services.budget_service import BudgetService
 from app.modules.invoice.models.invoice_model import Invoice, InvoiceStatus
 from app.modules.labour.models.labour_model import AttendanceEntry, Worker
 from app.modules.material.models.material_model import Material, MaterialEntry, MaterialEntryType
@@ -115,6 +116,9 @@ class AssistantContext:
             PurchaseOrder.org_id == self.org_id, PurchaseOrder.is_deleted.is_(False)
         )
         return list(self.db.execute(stmt).scalars().all())
+
+    def budget_summary_for_site(self, site_id: uuid.UUID):
+        return BudgetService(self.db).summary(self.org_id, site_id)
 
     def po_open_count(self) -> int:
         open_states = (POStatus.DRAFT, POStatus.SENT, POStatus.PARTIALLY_RECEIVED)
@@ -211,6 +215,7 @@ _W = {
     "site": {"site", "sites", "project", "projects"},
     "labour": {"labour", "labor", "labourer", "labourers", "worker", "workers", "mazdoor", "mazdur", "majdoor", "attendance", "haziri", "hazri", "muster", "wage", "wages", "dihaadi", "dihadi", "majduri", "mazduri"},
     "po": {"purchase order", "purchase orders", "purchase", " po ", " pos ", "p.o", "khareed", "kharid"},
+    "budget": {"budget", "budgeted", "boq", "bajat", "over budget", "under budget", "cost overrun", "variance"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -243,7 +248,7 @@ class RuleBasedAnswerProvider(AnswerProvider):
                     return guide
 
         domains: Set[str] = {
-            key for key in ("site", "vendor", "material", "invoice", "report", "stock", "issue", "labour", "po")
+            key for key in ("site", "vendor", "material", "invoice", "report", "stock", "issue", "labour", "po", "budget")
             if _has(q, key)
         }
 
@@ -251,6 +256,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "budget"):
+            return self._answer_budget(context)
         if _has(q, "po"):
             return self._answer_purchase_orders(context)
         if _has(q, "labour"):
@@ -371,6 +378,26 @@ class RuleBasedAnswerProvider(AnswerProvider):
         wages = context.labour_wage_total()
         tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
         return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
+
+    def _answer_budget(self, context: AssistantContext) -> str:
+        sites = context.sites()
+        if not sites:
+            return "No sites yet, so no budgets. Create a site, then add budget lines on its Budget tab."
+        rows: List[str] = []
+        any_budget = False
+        for site in sites:
+            s = context.budget_summary_for_site(site.id)
+            if s.total_budgeted == 0 and s.actual_total == 0:
+                continue
+            any_budget = True
+            flag = " ⚠️ over budget" if s.variance < 0 else ""
+            rows.append(
+                f"• {site.name}: budget ₹{_fmt(s.total_budgeted)}, "
+                f"spent ₹{_fmt(s.actual_total)} ({_fmt(s.percent_used)}%){flag}"
+            )
+        if not any_budget:
+            return "No budgets set yet. Open a site → Budget tab → add budget lines to track budget vs actual."
+        return "Budget vs actual by site (actuals = materials + labour + approved invoices):\n" + "\n".join(rows)
 
     def _answer_purchase_orders(self, context: AssistantContext) -> str:
         pos = context.purchase_orders()

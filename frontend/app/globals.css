@@ -425,6 +425,77 @@ h3 {
   cursor: not-allowed;
 }
 
+.budget-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.budget-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  background: var(--surface, #fff);
+}
+
+.budget-card-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  margin-bottom: 6px;
+}
+
+.budget-card-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.budget-over {
+  color: #c0392b;
+}
+
+.budget-under {
+  color: #1e7a46;
+}
+
+.budget-bar {
+  position: relative;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.budget-bar-fill {
+  height: 100%;
+  background: var(--navy);
+  transition: width 0.3s ease;
+}
+
+.budget-over-fill {
+  background: #c0392b;
+}
+
+.budget-bar-text {
+  position: absolute;
+  top: 0;
+  left: 10px;
+  line-height: 22px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+@media (max-width: 640px) {
+  .budget-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------- Filter pills ---------- */
 
 .sites-filters {
