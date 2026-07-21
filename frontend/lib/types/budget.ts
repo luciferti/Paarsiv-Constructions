@@ -20,6 +20,7 @@ export interface SiteBudgetSummary {
   actual_material: number;
   actual_labour: number;
   actual_invoices: number;
+  actual_equipment: number;
   actual_total: number;
   variance: number;
   percent_used: number;

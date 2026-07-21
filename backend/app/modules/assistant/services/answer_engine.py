@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.modules.billing.services.billing_service import BillingService
 from app.modules.budget.services.budget_service import BudgetService
+from app.modules.equipment.models.equipment_model import Equipment, EquipmentStatus
 from app.modules.expense.services.expense_service import ExpenseService
 from app.modules.invoice.models.invoice_model import Invoice, InvoiceStatus
 from app.modules.labour.models.labour_model import AttendanceEntry, Worker
@@ -146,6 +147,12 @@ class AssistantContext:
     def client_billing_summary(self):
         return BillingService(self.db).summary(self.org_id)
 
+    def equipment(self) -> List[Equipment]:
+        stmt = select(Equipment).where(
+            Equipment.org_id == self.org_id, Equipment.is_deleted.is_(False)
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
     def work_orders(self) -> List[WorkOrder]:
         stmt = (
             select(WorkOrder)
@@ -260,6 +267,7 @@ _W = {
     "cash": {"petty cash", "pettycash", "cash", "expense", "expenses", "cash balance", "float", "imprest", "topup", "top up"},
     "billing": {"ra bill", "ra bills", "client bill", "client bills", "billing", "billed", "client payment", "receivable", "outstanding from client", "running account"},
     "subcontract": {"subcontractor", "subcontractors", "sub-contractor", "subcon", "subbie", "work order", "work orders", "workorder", "petty contractor", "thekedar", "theka"},
+    "equipment": {"equipment", "machine", "machines", "machinery", "plant", "excavator", "jcb", "crane", "mixer", "vehicle", "vehicles", "gaadi", "machinery register"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -279,6 +287,7 @@ CREATE_GUIDES = [
     ("cash", "cash", "I can't create records myself — I only read your data. To log petty cash: Petty Cash page → add a top-up or an expense with its category."),
     ("billing", "billing", "I can't create records myself — I only read your data. To raise a client RA bill: Client Bills page → \"+ New Bill\", pick the site and enter the gross value and deductions."),
     ("subcontract", "subcontract", "I can't create records myself — I only read your data. To add a subcontractor: Subcontractors page → \"+ New\". To raise a work order: Work Orders page → \"+ New WO\"."),
+    ("equipment", "equipment", "I can't create records myself — I only read your data. To add machinery: Equipment page → \"+ New Equipment\". To log usage: open a site → Equipment tab → Log Usage."),
 ]
 
 
@@ -303,6 +312,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "equipment"):
+            return self._answer_equipment(context)
         if _has(q, "subcontract"):
             return self._answer_subcontract(context)
         if _has(q, "billing"):
@@ -431,6 +442,22 @@ class RuleBasedAnswerProvider(AnswerProvider):
         wages = context.labour_wage_total()
         tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
         return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
+
+    def _answer_equipment(self, context: AssistantContext) -> str:
+        eq = context.equipment()
+        if not eq:
+            return "No equipment on the register yet. Add machinery from the Equipment page."
+        by_status: Dict[str, int] = {}
+        for e in eq:
+            by_status[e.status.value] = by_status.get(e.status.value, 0) + 1
+        status_bits = ", ".join(f"{n} {s.replace('_', ' ')}" for s, n in by_status.items())
+        listing = "\n".join(
+            f"• {e.code} {e.name}"
+            + (f" — {e.category}" if e.category else "")
+            + f" [{e.ownership.value}, {e.status.value.replace('_', ' ')}]"
+            for e in eq[:15]
+        )
+        return f"You have {len(eq)} equipment item(s) ({status_bits}):\n{listing}"
 
     def _answer_subcontract(self, context: AssistantContext) -> str:
         wos = context.work_orders()

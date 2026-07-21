@@ -36,6 +36,7 @@ class SiteBudgetSummary(BaseModel):
     actual_material: float
     actual_labour: float
     actual_invoices: float
+    actual_equipment: float
     actual_total: float
     variance: float  # total_budgeted - actual_total (positive = under budget)
     percent_used: float  # actual_total / total_budgeted * 100 (0 if no budget)

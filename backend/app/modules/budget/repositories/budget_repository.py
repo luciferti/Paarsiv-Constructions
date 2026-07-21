@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.modules.budget.models.budget_model import BudgetLine
+from app.modules.equipment.models.equipment_model import EquipmentUsage
 from app.modules.invoice.models.invoice_model import Invoice, InvoiceStatus
 from app.modules.labour.models.labour_model import AttendanceEntry
 from app.modules.material.models.material_model import MaterialEntry, MaterialEntryType
@@ -82,5 +83,11 @@ class BudgetRepository:
             Invoice.org_id == org_id,
             Invoice.site_id == site_id,
             Invoice.status == InvoiceStatus.APPROVED,
+        )
+        return float(self.db.execute(stmt).scalar_one())
+
+    def actual_equipment_cost(self, org_id: uuid.UUID, site_id: uuid.UUID) -> float:
+        stmt = select(func.coalesce(func.sum(EquipmentUsage.cost), 0)).where(
+            EquipmentUsage.org_id == org_id, EquipmentUsage.site_id == site_id
         )
         return float(self.db.execute(stmt).scalar_one())

@@ -50,7 +50,10 @@ class BudgetService:
         actual_material = round(self.repo.actual_material_cost(org_id, site_id), 2)
         actual_labour = round(self.repo.actual_labour_cost(org_id, site_id), 2)
         actual_invoices = round(self.repo.actual_invoice_cost(org_id, site_id), 2)
-        actual_total = round(actual_material + actual_labour + actual_invoices, 2)
+        actual_equipment = round(self.repo.actual_equipment_cost(org_id, site_id), 2)
+        actual_total = round(
+            actual_material + actual_labour + actual_invoices + actual_equipment, 2
+        )
 
         percent_used = round(actual_total / total_budgeted * 100, 1) if total_budgeted > 0 else 0.0
 
@@ -64,6 +67,7 @@ class BudgetService:
             actual_material=actual_material,
             actual_labour=actual_labour,
             actual_invoices=actual_invoices,
+            actual_equipment=actual_equipment,
             actual_total=actual_total,
             variance=round(total_budgeted - actual_total, 2),
             percent_used=percent_used,

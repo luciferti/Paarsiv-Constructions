@@ -124,6 +124,10 @@ export function SiteBudgetPanel({ siteId }: { siteId: string }) {
             <td>Invoices (approved)</td>
             <td>{inr(summary.actual_invoices)}</td>
           </tr>
+          <tr>
+            <td>Equipment (usage)</td>
+            <td>{inr(summary.actual_equipment)}</td>
+          </tr>
         </tbody>
       </table>
 
