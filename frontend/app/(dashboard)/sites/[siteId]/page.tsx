@@ -7,13 +7,14 @@ import { SiteBudgetPanel } from "@/components/budget/SiteBudgetPanel";
 import { SiteEquipmentPanel } from "@/components/equipment/SiteEquipmentPanel";
 import { SiteLabourPanel } from "@/components/labour/SiteLabourPanel";
 import { MaterialStockPanel } from "@/components/materials/MaterialStockPanel";
+import { SiteProgressPanel } from "@/components/progress/SiteProgressPanel";
 import { SiteReportsPanel } from "@/components/reports/SiteReportsPanel";
 import { SiteTeamPanel } from "@/components/sites/SiteTeamPanel";
 import { AISummaryPanel } from "@/components/summary/AISummaryPanel";
 import { archiveSite } from "@/lib/api/sites";
 import { useSite } from "@/lib/hooks/useSites";
 
-const TABS = ["Overview", "Team", "Reports", "Materials", "Labour", "Equipment", "Budget", "Vendors"] as const;
+const TABS = ["Overview", "Progress", "Team", "Reports", "Materials", "Labour", "Equipment", "Budget", "Vendors"] as const;
 type Tab = (typeof TABS)[number];
 
 const COMING_SOON: Partial<Record<Tab, string>> = {
@@ -81,6 +82,7 @@ export default function SiteDetailPage({ params }: { params: { siteId: string } 
 
       {tab === "Overview" && <AISummaryPanel siteId={site.id} />}
 
+      {tab === "Progress" && <SiteProgressPanel siteId={site.id} />}
       {tab === "Team" && <SiteTeamPanel siteId={site.id} />}
       {tab === "Materials" && <MaterialStockPanel siteId={site.id} />}
       {tab === "Labour" && <SiteLabourPanel siteId={site.id} />}

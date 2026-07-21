@@ -34,6 +34,7 @@ from app.modules.invoice.models.invoice_model import Invoice, InvoiceStatus
 from app.modules.labour.models.labour_model import AttendanceEntry, Worker
 from app.modules.material.models.material_model import Material, MaterialEntry, MaterialEntryType
 from app.modules.material.services.material_service import MaterialEntryService
+from app.modules.progress.services.progress_service import ProgressService
 from app.modules.purchase.models.po_model import POStatus, PurchaseOrder
 from app.modules.report.models.report_model import DailyReport
 from app.modules.site.models.site_model import Site
@@ -153,6 +154,9 @@ class AssistantContext:
         )
         return list(self.db.execute(stmt).scalars().all())
 
+    def progress_for_site(self, site_id: uuid.UUID):
+        return ProgressService(self.db).summary(self.org_id, site_id)
+
     def work_orders(self) -> List[WorkOrder]:
         stmt = (
             select(WorkOrder)
@@ -268,6 +272,7 @@ _W = {
     "billing": {"ra bill", "ra bills", "client bill", "client bills", "billing", "billed", "client payment", "receivable", "outstanding from client", "running account"},
     "subcontract": {"subcontractor", "subcontractors", "sub-contractor", "subcon", "subbie", "work order", "work orders", "workorder", "petty contractor", "thekedar", "theka"},
     "equipment": {"equipment", "machine", "machines", "machinery", "plant", "excavator", "jcb", "crane", "mixer", "vehicle", "vehicles", "gaadi", "machinery register"},
+    "progress": {"progress", "milestone", "milestones", "completion", "percent complete", "how far", "kitna complete", "schedule", "kaam kitna", "kaam kitna hua", "kitna kaam"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -288,6 +293,7 @@ CREATE_GUIDES = [
     ("billing", "billing", "I can't create records myself — I only read your data. To raise a client RA bill: Client Bills page → \"+ New Bill\", pick the site and enter the gross value and deductions."),
     ("subcontract", "subcontract", "I can't create records myself — I only read your data. To add a subcontractor: Subcontractors page → \"+ New\". To raise a work order: Work Orders page → \"+ New WO\"."),
     ("equipment", "equipment", "I can't create records myself — I only read your data. To add machinery: Equipment page → \"+ New Equipment\". To log usage: open a site → Equipment tab → Log Usage."),
+    ("progress", "progress", "I can't create records myself — I only read your data. To track progress: open a site → Progress tab → add milestones and update their %."),
 ]
 
 
@@ -312,6 +318,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "progress"):
+            return self._answer_progress(context)
         if _has(q, "equipment"):
             return self._answer_equipment(context)
         if _has(q, "subcontract"):
@@ -442,6 +450,26 @@ class RuleBasedAnswerProvider(AnswerProvider):
         wages = context.labour_wage_total()
         tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
         return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
+
+    def _answer_progress(self, context: AssistantContext) -> str:
+        sites = context.sites()
+        if not sites:
+            return "No sites yet, so no progress to show. Create a site, then add milestones on its Progress tab."
+        rows: List[str] = []
+        any_ms = False
+        for site in sites:
+            s = context.progress_for_site(site.id)
+            if s.milestone_count == 0:
+                continue
+            any_ms = True
+            done = s.by_status.get("completed", 0)
+            rows.append(
+                f"• {site.name}: {_fmt(s.overall_percent)}% complete "
+                f"({done}/{s.milestone_count} milestones done)"
+            )
+        if not any_ms:
+            return "No milestones set yet. Open a site → Progress tab → add milestones to track completion."
+        return "Site progress (weighted by milestone):\n" + "\n".join(rows)
 
     def _answer_equipment(self, context: AssistantContext) -> str:
         eq = context.equipment()
