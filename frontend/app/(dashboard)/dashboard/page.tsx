@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { getDashboardSummary } from "@/lib/api/dashboard";
+import { seedDemoData } from "@/lib/api/demo";
 import { DashboardSummary } from "@/lib/types/dashboard";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -24,25 +25,64 @@ export default function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
+  const [seedError, setSeedError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
     getDashboardSummary()
       .then(setSummary)
       .catch((err) => setError(err instanceof Error ? err.message : "Something went wrong"))
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleSeed() {
+    setSeeding(true);
+    setSeedError(null);
+    try {
+      await seedDemoData();
+      load();
+    } catch (err) {
+      setSeedError(err instanceof Error ? err.message : "Couldn't load sample data");
+    } finally {
+      setSeeding(false);
+    }
+  }
+
   if (loading) return <div className="sites-page">Loading dashboard...</div>;
   if (error) return <div className="sites-page"><p className="form-error">{error}</p></div>;
   if (!summary) return null;
 
   const activeSites = summary.sites_by_status.active ?? 0;
+  const isEmptyOrg =
+    summary.total_sites === 0 && summary.total_vendors === 0 && summary.total_materials === 0;
 
   return (
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Dashboard</h1>
       </div>
+
+      {isEmptyOrg && (
+        <div className="seed-card">
+          <div>
+            <h2 className="seed-card-title">Welcome! Your workspace is empty.</h2>
+            <p className="seed-card-text">
+              Load a realistic sample project — sites, workers, purchase orders, budgets,
+              subcontractors, equipment and more — to explore everything in seconds. You can
+              delete it later or start adding your own data anytime.
+            </p>
+            {seedError && <p className="form-error">{seedError}</p>}
+          </div>
+          <button type="button" className="button-primary" onClick={handleSeed} disabled={seeding}>
+            {seeding ? "Loading sample data…" : "Load sample data"}
+          </button>
+        </div>
+      )}
 
       <div className="stat-tile-grid">
         <div className="stat-tile">

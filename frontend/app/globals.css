@@ -388,6 +388,38 @@ h3 {
   cursor: not-allowed;
 }
 
+.seed-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md, 12px);
+  background: var(--paper-2, rgba(212, 149, 26, 0.06));
+  padding: 20px 22px;
+  margin-bottom: 22px;
+}
+
+.seed-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 4px;
+}
+
+.seed-card-text {
+  font-size: 14px;
+  color: var(--ink-muted);
+  margin: 0;
+  max-width: 60ch;
+}
+
+.seed-card .button-primary {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .button-secondary {
   display: inline-flex;
   align-items: center;
