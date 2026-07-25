@@ -63,20 +63,56 @@ def _first(d: dict, *keys: str) -> str:
     return ""
 
 
+_TEXT_KEYS = ("messageText", "message", "body", "text", "content")
+_SENDER_KEYS = ("mobileNumber", "from", "sender", "msisdn", "phoneNumber", "contactKey")
+
+
+def _extract_message(node: dict) -> Tuple[str, str]:
+    """(sender, text) from one message-like dict. `text` may be a string or a
+    WhatsApp/GroupConnect object like {"body": "..."}."""
+    sender = _first(node, *_SENDER_KEYS)
+    text = _first(node, *_TEXT_KEYS)
+    if not text and isinstance(node.get("text"), dict):
+        text = _first(node["text"], "body", "message", "content")
+    return sender, text
+
+
 def _parse_sfmc_payload(payload: dict) -> Tuple[str, str]:
     """Pull (sender_phone, message_text) from an SFMC inbound JSON body.
 
-    SFMC inbound shapes vary by channel/config; we check the common field
-    names and a nested `messages`/`entry` envelope. Returns ("","") if we
-    can't find them (caller then sends the empty-prompt hint)."""
-    body = _first(payload, "messageText", "message", "body", "text", "content")
-    sender = _first(payload, "mobileNumber", "from", "sender", "msisdn", "phoneNumber", "contactKey")
+    Handles the shapes SFMC WhatsApp emits depending on channel/config:
+      1. Flat MobileConnect:  {"mobileNumber": "...", "messageText": "..."}
+      2. Nested messages[]:   {"messages": [{"from": "...", "text": "..."}]}
+      3. GroupConnect/Meta:   {"entry": [{"changes": [{"value":
+                                {"messages": [{"from": "...",
+                                 "text": {"body": "..."}}]}}]}]}
+    Returns ("","") if nothing matches (caller then sends the prompt hint).
+    A canonical sample lives in tests/fixtures/sfmc_inbound_samples.json."""
+    sender, body = _extract_message(payload)
+    if sender and body:
+        return sender, body
 
-    if (not body or not sender) and isinstance(payload.get("messages"), list) and payload["messages"]:
-        msg = payload["messages"][0]
-        if isinstance(msg, dict):
-            body = body or _first(msg, "messageText", "message", "body", "text", "content")
-            sender = sender or _first(msg, "mobileNumber", "from", "sender", "msisdn", "phoneNumber")
+    # 2. top-level messages[]
+    messages = payload.get("messages")
+    if isinstance(messages, list) and messages and isinstance(messages[0], dict):
+        s, b = _extract_message(messages[0])
+        sender, body = sender or s, body or b
+        if sender and body:
+            return sender, body
+
+    # 3. GroupConnect/Meta envelope: entry[].changes[].value.messages[]
+    for entry in payload.get("entry", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        for change in entry.get("changes", []) or []:
+            value = change.get("value", {}) if isinstance(change, dict) else {}
+            msgs = value.get("messages") if isinstance(value, dict) else None
+            if isinstance(msgs, list) and msgs and isinstance(msgs[0], dict):
+                s, b = _extract_message(msgs[0])
+                sender, body = sender or s, body or b
+                if sender and body:
+                    return sender, body
+
     return sender, body
 
 

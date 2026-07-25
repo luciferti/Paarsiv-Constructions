@@ -77,8 +77,19 @@ including a nested `messages[]` envelope) and replies with
 `{ "reply": "...", "to": "<sender>" }`. It also still accepts Twilio's form
 format. Also set `WHATSAPP_DEFAULT_ORG_ID` to the org the bot should answer for.
 
-> If your SFMC inbound payload differs, send one sample body and the parser
-> (`_parse_sfmc_payload`) can be matched to it exactly.
+**Accepted inbound shapes** — the parser (`_parse_sfmc_payload`) handles the
+three formats SFMC WhatsApp emits depending on channel, all covered by
+`backend/tests/fixtures/sfmc_inbound_samples.json`:
+
+1. **Flat MobileConnect** — `{"mobileNumber": "+91…", "messageText": "…"}`
+2. **Nested messages[]** — `{"messages": [{"from": "+91…", "text": "…"}]}`
+3. **GroupConnect / Meta** — `{"entry": [{"changes": [{"value": {"messages":
+   [{"from": "+91…", "text": {"body": "…"}}]}}]}]}`
+
+Sender is read from `mobileNumber`/`from`/`sender`/`msisdn`/`phoneNumber`/
+`contactKey`; text from `messageText`/`message`/`body`/`text`/`content` (with
+`text` allowed to be a `{ "body": "…" }` object). If your live payload differs,
+add it to that fixtures file and the parser can be matched exactly.
 
 ---
 

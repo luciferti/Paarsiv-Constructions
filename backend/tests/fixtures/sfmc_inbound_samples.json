@@ -1,0 +1,69 @@
+{
+  "_comment": "Canonical SFMC inbound WhatsApp payloads the HRMS webhook accepts. Replace/extend with a real captured payload from your SFMC channel when available; the parser (_parse_sfmc_payload) is matched to these shapes.",
+  "samples": [
+    {
+      "name": "flat_mobileconnect",
+      "note": "SFMC MobileConnect / simple inbound API — flat fields.",
+      "expected_sender": "+919999900001",
+      "expected_text": "how many sites do I have",
+      "payload": {
+        "mobileNumber": "+919999900001",
+        "messageText": "how many sites do I have",
+        "keyword": "",
+        "messageId": "b1f2c3d4-0001-4a5b-8c9d-000000000001",
+        "eventType": "MOInbound",
+        "timestamp": "2026-07-20T09:15:00Z"
+      }
+    },
+    {
+      "name": "nested_messages",
+      "note": "SFMC messaging framework — messages[] envelope with contactKey.",
+      "expected_sender": "+919999900002",
+      "expected_text": "stock at Riverside Tower",
+      "payload": {
+        "definitionKey": "hrms_whatsapp_inbound",
+        "messages": [
+          {
+            "from": "+919999900002",
+            "contactKey": "+919999900002",
+            "text": "stock at Riverside Tower",
+            "channel": "whatsapp",
+            "receivedAt": "2026-07-20T09:16:30Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "groupconnect_meta_envelope",
+      "note": "SFMC GroupConnect (WhatsApp Business API) — Meta-style entry/changes/value/messages with text.body.",
+      "expected_sender": "+919999900003",
+      "expected_text": "any issues this week",
+      "payload": {
+        "entry": [
+          {
+            "id": "WABA_ID",
+            "changes": [
+              {
+                "field": "messages",
+                "value": {
+                  "messaging_product": "whatsapp",
+                  "metadata": { "display_phone_number": "+911140000000", "phone_number_id": "PNID" },
+                  "contacts": [{ "profile": { "name": "Site Engineer" }, "wa_id": "919999900003" }],
+                  "messages": [
+                    {
+                      "from": "+919999900003",
+                      "id": "wamid.HBgMOTE...",
+                      "timestamp": "1784543820",
+                      "type": "text",
+                      "text": { "body": "any issues this week" }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

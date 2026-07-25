@@ -1,4 +1,6 @@
+import json
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,6 +8,10 @@ from fastapi.testclient import TestClient
 from app.core.database import get_db
 from app.core.deps import CurrentUser, get_current_user
 from app.main import app
+
+_SAMPLES = json.loads(
+    (Path(__file__).resolve().parents[2] / "fixtures" / "sfmc_inbound_samples.json").read_text()
+)["samples"]
 
 ALL_PERMISSIONS = frozenset({"messaging:admin"})
 
@@ -179,4 +185,34 @@ class TestInboundJson:
         )
         assert r.status_code == 200
         assert r.json()["to"] == "+918888888888"
+        app.dependency_overrides.clear()
+
+
+class TestSfmcSampleFixtures:
+    """The canonical SFMC inbound samples parse and drive the webhook."""
+
+    @pytest.mark.parametrize("sample", _SAMPLES, ids=[s["name"] for s in _SAMPLES])
+    def test_parser_extracts_sender_and_text(self, sample):
+        from app.modules.assistant.api.v1.whatsapp_webhook_routes import _parse_sfmc_payload
+
+        sender, text = _parse_sfmc_payload(sample["payload"])
+        assert sender == sample["expected_sender"]
+        assert text == sample["expected_text"]
+
+    @pytest.mark.parametrize("sample", _SAMPLES, ids=[s["name"] for s in _SAMPLES])
+    def test_webhook_answers_each_sample(self, db, org_id, monkeypatch, sample):
+        import app.modules.assistant.api.v1.whatsapp_webhook_routes as webhook_module
+
+        monkeypatch.setattr(webhook_module.settings, "whatsapp_default_org_id", str(org_id))
+
+        def override_get_db():
+            yield db
+
+        app.dependency_overrides[get_db] = override_get_db
+        c = TestClient(app)
+        r = c.post("/api/v1/whatsapp/webhook", json=sample["payload"])
+        assert r.status_code == 200
+        body = r.json()
+        assert body["to"] == sample["expected_sender"]
+        assert body["reply"]  # a real answer, not the empty-prompt path
         app.dependency_overrides.clear()
