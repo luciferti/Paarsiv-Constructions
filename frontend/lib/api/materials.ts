@@ -5,6 +5,8 @@ import {
   MaterialEntryFormValues,
   MaterialFormValues,
   MaterialStatus,
+  MaterialTransfer,
+  MaterialTransferFormValues,
   PaginatedMaterials,
   SiteMaterialStockItem,
 } from "@/lib/types/material";
@@ -54,4 +56,14 @@ export function addSiteMaterialEntry(
     method: "POST",
     body: payload,
   });
+}
+
+export function createMaterialTransfer(
+  payload: MaterialTransferFormValues
+): Promise<MaterialTransfer> {
+  return apiRequest<MaterialTransfer>("/material-transfers", { method: "POST", body: payload });
+}
+
+export function listSiteMaterialTransfers(siteId: string): Promise<MaterialTransfer[]> {
+  return apiRequest<MaterialTransfer[]>(`/material-transfers/site/${siteId}`);
 }

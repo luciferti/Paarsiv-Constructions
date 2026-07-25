@@ -1,8 +1,13 @@
-from app.core.errors import ConflictError, NotFoundError
+from app.core.errors import ConflictError, NotFoundError, ValidationError
 
 
 class MaterialError(Exception):
     """Base exception for the material module."""
+
+
+class SameSiteTransferError(MaterialError, ValidationError):
+    def __init__(self):
+        super().__init__("Source and destination sites must be different")
 
 
 class MaterialNotFoundError(MaterialError, NotFoundError):

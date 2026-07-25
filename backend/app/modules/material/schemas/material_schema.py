@@ -88,4 +88,28 @@ class SiteMaterialStockItem(BaseModel):
     quantity_received: float
     quantity_used: float
     quantity_adjusted: float
+    quantity_transferred_in: float = 0
+    quantity_transferred_out: float = 0
     quantity_on_hand: float
+
+
+class MaterialTransferCreate(BaseModel):
+    material_id: uuid.UUID
+    from_site_id: uuid.UUID
+    to_site_id: uuid.UUID
+    quantity: float = Field(..., gt=0)
+    transfer_date: date
+    notes: Optional[str] = None
+
+
+class MaterialTransferOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    material_id: uuid.UUID
+    from_site_id: uuid.UUID
+    to_site_id: uuid.UUID
+    quantity: float
+    transfer_date: date
+    notes: Optional[str] = None
+    created_at: datetime

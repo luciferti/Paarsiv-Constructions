@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
-from app.core.errors import ConflictError, NotFoundError, UnauthorizedError
+from app.core.errors import ConflictError, NotFoundError, UnauthorizedError, ValidationError
 
 # Side-effect import: registers the HRMS `employees`/`projects` stub tables in
 # the ORM metadata so feature models' foreign keys resolve in every environment
@@ -84,6 +84,11 @@ def handle_conflict(request: Request, exc: Exception) -> JSONResponse:
 @app.exception_handler(UnauthorizedError)
 def handle_unauthorized(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=401, content={"detail": str(exc)})
+
+
+@app.exception_handler(ValidationError)
+def handle_validation(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.get("/health")

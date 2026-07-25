@@ -261,7 +261,7 @@ _W = {
     "summary": {"summary", "overview", "digest", "report card", "sab kuch", "everything", "पूरा"},
     "all": {"sab", "sabhi", "saare", "sare", "all", "total", "pura", "poora"},
     "count": {"kitne", "kitna", "kitni", "how many", "count", "number of"},
-    "stock": {"stock", "inventory", "on hand", "saman", "samaan", "maal", "bacha"},
+    "stock": {"stock", "inventory", "on hand", "saman", "samaan", "maal", "bacha", "transfer", "transferred", "transfers"},
     "material": {"material", "materials", "meterial", "meterials", "cement", "steel"},
     "price": {"price", "cost", "spend", "kharcha", "kharch", "kimat", "keemat", "daam", "rate", "amount", "paisa", "paise"},
     "issue": {"issue", "issues", "blocker", "problem", "dikkat", "delay", "atka", "rukavat"},

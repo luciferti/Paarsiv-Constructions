@@ -4,7 +4,13 @@ from typing import List, Optional, Tuple
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from app.modules.material.models.material_model import Material, MaterialEntry, MaterialEntryType, MaterialStatus
+from app.modules.material.models.material_model import (
+    Material,
+    MaterialEntry,
+    MaterialEntryType,
+    MaterialStatus,
+    MaterialTransfer,
+)
 
 
 class MaterialRepository:
@@ -101,3 +107,54 @@ class MaterialEntryRepository:
         )
         rows = self.db.execute(stmt).mappings().all()
         return [dict(row) for row in rows]
+
+
+class MaterialTransferRepository:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(self, transfer: MaterialTransfer) -> MaterialTransfer:
+        self.db.add(transfer)
+        self.db.flush()
+        return transfer
+
+    def list_for_site(self, org_id: uuid.UUID, site_id: uuid.UUID) -> List[MaterialTransfer]:
+        stmt = (
+            select(MaterialTransfer)
+            .where(
+                MaterialTransfer.org_id == org_id,
+                (MaterialTransfer.from_site_id == site_id)
+                | (MaterialTransfer.to_site_id == site_id),
+            )
+            .order_by(MaterialTransfer.transfer_date.desc(), MaterialTransfer.created_at.desc())
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
+    def totals_for_site(self, org_id: uuid.UUID, site_id: uuid.UUID) -> List[dict]:
+        """Per-material transferred-in/out for a site (in = to this site,
+        out = from this site)."""
+        transferred_in = func.sum(
+            case((MaterialTransfer.to_site_id == site_id, MaterialTransfer.quantity), else_=0)
+        ).label("transferred_in")
+        transferred_out = func.sum(
+            case((MaterialTransfer.from_site_id == site_id, MaterialTransfer.quantity), else_=0)
+        ).label("transferred_out")
+        stmt = (
+            select(
+                Material.id.label("material_id"),
+                Material.name.label("material_name"),
+                Material.code.label("material_code"),
+                Material.unit.label("unit"),
+                transferred_in,
+                transferred_out,
+            )
+            .join(MaterialTransfer, MaterialTransfer.material_id == Material.id)
+            .where(
+                MaterialTransfer.org_id == org_id,
+                (MaterialTransfer.from_site_id == site_id)
+                | (MaterialTransfer.to_site_id == site_id),
+            )
+            .group_by(Material.id, Material.name, Material.code, Material.unit)
+            .order_by(Material.name)
+        )
+        return [dict(row) for row in self.db.execute(stmt).mappings().all()]

@@ -59,3 +59,25 @@ class MaterialEntry(UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, Base):
     entry_date: Mapped[date] = mapped_column(Date, nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)
+
+
+class MaterialTransfer(UUIDPrimaryKeyMixin, OrgScopedMixin, TimestampMixin, Base):
+    """Moves stock of a material from one site to another. The stock summary
+    credits the destination (transfers-in) and debits the source (transfers-out)
+    — kept separate from received/used so procurement/consumption stats stay clean."""
+
+    __tablename__ = "material_transfers"
+
+    material_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("materials.id"), nullable=False, index=True
+    )
+    from_site_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("sites.id"), nullable=False, index=True
+    )
+    to_site_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("sites.id"), nullable=False, index=True
+    )
+    quantity: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    transfer_date: Mapped[date] = mapped_column(Date, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid(as_uuid=True), nullable=True)

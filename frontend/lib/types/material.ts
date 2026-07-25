@@ -70,5 +70,27 @@ export interface SiteMaterialStockItem {
   quantity_received: number;
   quantity_used: number;
   quantity_adjusted: number;
+  quantity_transferred_in: number;
+  quantity_transferred_out: number;
   quantity_on_hand: number;
+}
+
+export interface MaterialTransfer {
+  id: string;
+  material_id: string;
+  from_site_id: string;
+  to_site_id: string;
+  quantity: number;
+  transfer_date: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface MaterialTransferFormValues {
+  material_id: string;
+  from_site_id: string;
+  to_site_id: string;
+  quantity: number;
+  transfer_date: string;
+  notes?: string | null;
 }

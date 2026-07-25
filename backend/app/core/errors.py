@@ -13,3 +13,7 @@ class ConflictError(Exception):
 
 class UnauthorizedError(Exception):
     """Raise when credentials are missing, invalid, or expired."""
+
+
+class ValidationError(Exception):
+    """Raise when a request is well-formed but semantically invalid."""

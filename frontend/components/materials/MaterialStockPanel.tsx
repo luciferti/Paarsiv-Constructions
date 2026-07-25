@@ -2,10 +2,12 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
-import { addSiteMaterialEntry, listMaterials } from "@/lib/api/materials";
+import { addSiteMaterialEntry, createMaterialTransfer, listMaterials } from "@/lib/api/materials";
+import { listSites } from "@/lib/api/sites";
 import { listVendors } from "@/lib/api/vendors";
 import { useSiteMaterialStock } from "@/lib/hooks/useMaterials";
 import { MaterialEntryType, MaterialListItem } from "@/lib/types/material";
+import { SiteListItem } from "@/lib/types/site";
 import { VendorListItem } from "@/lib/types/vendor";
 
 const ENTRY_TYPE_LABEL: Record<MaterialEntryType, string> = {
@@ -27,10 +29,46 @@ export function MaterialStockPanel({ siteId }: { siteId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Transfer-to-another-site form.
+  const [sites, setSites] = useState<SiteListItem[]>([]);
+  const [tMaterialId, setTMaterialId] = useState("");
+  const [tToSite, setTToSite] = useState("");
+  const [tQty, setTQty] = useState("");
+  const [tDate, setTDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [tSubmitting, setTSubmitting] = useState(false);
+  const [tError, setTError] = useState<string | null>(null);
+
   useEffect(() => {
     listMaterials({ status: "active", pageSize: 100 }).then((res) => setMaterials(res.items));
     listVendors({ status: "active", pageSize: 100 }).then((res) => setVendors(res.items));
+    listSites({ pageSize: 100 }).then((res) => setSites(res.items));
   }, []);
+
+  async function handleTransfer(event: FormEvent) {
+    event.preventDefault();
+    setTError(null);
+    if (!tMaterialId || !tToSite || !tQty || Number(tQty) <= 0) {
+      setTError("Choose a material, destination site and quantity greater than 0");
+      return;
+    }
+    setTSubmitting(true);
+    try {
+      await createMaterialTransfer({
+        material_id: tMaterialId,
+        from_site_id: siteId,
+        to_site_id: tToSite,
+        quantity: Number(tQty),
+        transfer_date: tDate,
+      });
+      setTQty("");
+      setTToSite("");
+      refetch();
+    } catch (err) {
+      setTError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setTSubmitting(false);
+    }
+  }
 
   async function handleAddEntry(event: FormEvent) {
     event.preventDefault();
@@ -73,6 +111,8 @@ export function MaterialStockPanel({ siteId }: { siteId: string }) {
               <th>Received</th>
               <th>Used</th>
               <th>Adjusted</th>
+              <th>In</th>
+              <th>Out</th>
               <th>On Hand</th>
             </tr>
           </thead>
@@ -86,6 +126,8 @@ export function MaterialStockPanel({ siteId }: { siteId: string }) {
                 <td>{item.quantity_received}</td>
                 <td>{item.quantity_used}</td>
                 <td>{item.quantity_adjusted}</td>
+                <td>{item.quantity_transferred_in || "—"}</td>
+                <td>{item.quantity_transferred_out || "—"}</td>
                 <td className="stock-on-hand">{item.quantity_on_hand}</td>
               </tr>
             ))}
@@ -161,6 +203,60 @@ export function MaterialStockPanel({ siteId }: { siteId: string }) {
         )}
         <button type="submit" className="button-primary" disabled={submitting}>
           {submitting ? "Logging…" : "Log Entry"}
+        </button>
+      </form>
+
+      <form onSubmit={handleTransfer} className="material-entry-form">
+        <h3 className="form-section-title">Transfer to another site</h3>
+        {tError && <p className="form-error">{tError}</p>}
+        <div className="form-grid form-grid-2">
+          <div className="form-field">
+            <label htmlFor="transfer-material">Material</label>
+            <select id="transfer-material" value={tMaterialId} onChange={(e) => setTMaterialId(e.target.value)}>
+              <option value="">Select material…</option>
+              {materials.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.unit})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-field">
+            <label htmlFor="transfer-to">Destination site</label>
+            <select id="transfer-to" value={tToSite} onChange={(e) => setTToSite(e.target.value)}>
+              <option value="">Select site…</option>
+              {sites.filter((s) => s.id !== siteId).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="form-grid form-grid-2">
+          <div className="form-field">
+            <label htmlFor="transfer-qty">Quantity</label>
+            <input
+              id="transfer-qty"
+              type="number"
+              min="0"
+              step="any"
+              value={tQty}
+              onChange={(e) => setTQty(e.target.value)}
+            />
+          </div>
+          <div className="form-field">
+            <label htmlFor="transfer-date">Date</label>
+            <input
+              id="transfer-date"
+              type="date"
+              value={tDate}
+              onChange={(e) => setTDate(e.target.value)}
+            />
+          </div>
+        </div>
+        <button type="submit" className="button-secondary" disabled={tSubmitting}>
+          {tSubmitting ? "Transferring…" : "Transfer Stock"}
         </button>
       </form>
     </div>
