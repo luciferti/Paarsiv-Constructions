@@ -53,6 +53,8 @@ from app.modules.purchase.schemas.po_schema import (
 from app.modules.purchase.services.po_service import PurchaseOrderService
 from app.modules.report.schemas.report_schema import DailyReportCreate
 from app.modules.report.services.report_service import ReportService
+from app.modules.safety.schemas.safety_schema import IncidentCreate, IncidentUpdate
+from app.modules.safety.services.safety_service import SafetyService
 from app.modules.site.repositories.site_repository import SiteRepository
 from app.modules.site.schemas.site_schema import SiteCreate
 from app.modules.site.services.site_service import SiteService
@@ -214,6 +216,17 @@ def seed_org(db: Session, org_id: uuid.UUID, created_by: uuid.UUID) -> Dict[str,
     prog.add_milestone(org_id, metro.id, created_by, MilestoneCreate(
         title="RCC framework", progress_percent=25, weight=3, status="in_progress", target_date=d(-45)))
 
+    # -- Safety incidents ---------------------------------------------------
+    safety = SafetyService(db)
+    safety.create_incident(org_id, created_by, IncidentCreate(
+        site_id=riverside.id, incident_date=d(14), incident_type="near_miss", severity="medium",
+        title="Worker slipped near wet scaffold", description="No injury; area cordoned off.",
+        action_taken="Anti-slip mats installed; toolbox talk conducted.", reported_by="Site Safety Officer"))
+    inc2 = safety.create_incident(org_id, created_by, IncidentCreate(
+        site_id=riverside.id, incident_date=d(3), incident_type="first_aid", severity="low",
+        title="Minor cut while cutting rebar", action_taken="First aid administered.", reported_by="Foreman"))
+    safety.update_incident(org_id, inc2.id, IncidentUpdate(status="closed"))
+
     # -- Daily reports ------------------------------------------------------
     rep = ReportService(db)
     rep.create_report(org_id, riverside.id, created_by, DailyReportCreate(
@@ -229,4 +242,5 @@ def seed_org(db: Session, org_id: uuid.UUID, created_by: uuid.UUID) -> Dict[str,
         "sites": 2, "vendors": 3, "materials": 3, "workers": 4,
         "purchase_orders": 2, "client_bills": 2, "subcontractors": 2,
         "work_orders": 2, "equipment": 2, "milestones": 6, "daily_reports": 2,
+        "incidents": 2,
     }

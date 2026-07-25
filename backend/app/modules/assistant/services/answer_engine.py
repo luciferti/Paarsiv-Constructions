@@ -37,6 +37,7 @@ from app.modules.material.services.material_service import MaterialEntryService
 from app.modules.progress.services.progress_service import ProgressService
 from app.modules.purchase.models.po_model import POStatus, PurchaseOrder
 from app.modules.report.models.report_model import DailyReport
+from app.modules.safety.services.safety_service import SafetyService
 from app.modules.site.models.site_model import Site
 from app.modules.subcontract.models.subcontract_model import Subcontractor, WorkOrder, WorkOrderStatus
 from app.modules.vendor.models.vendor_model import Vendor
@@ -157,6 +158,9 @@ class AssistantContext:
     def progress_for_site(self, site_id: uuid.UUID):
         return ProgressService(self.db).summary(self.org_id, site_id)
 
+    def safety_summary(self):
+        return SafetyService(self.db).summary(self.org_id)
+
     def work_orders(self) -> List[WorkOrder]:
         stmt = (
             select(WorkOrder)
@@ -273,6 +277,7 @@ _W = {
     "subcontract": {"subcontractor", "subcontractors", "sub-contractor", "subcon", "subbie", "work order", "work orders", "workorder", "petty contractor", "thekedar", "theka"},
     "equipment": {"equipment", "machine", "machines", "machinery", "plant", "excavator", "jcb", "crane", "mixer", "vehicle", "vehicles", "gaadi", "machinery register"},
     "progress": {"progress", "milestone", "milestones", "completion", "percent complete", "how far", "kitna complete", "schedule", "kaam kitna", "kaam kitna hua", "kitna kaam"},
+    "safety": {"safety", "incident", "incidents", "accident", "accidents", "near miss", "injury", "injuries", "hazard", "durghatna", "safety record"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -294,6 +299,7 @@ CREATE_GUIDES = [
     ("subcontract", "subcontract", "I can't create records myself — I only read your data. To add a subcontractor: Subcontractors page → \"+ New\". To raise a work order: Work Orders page → \"+ New WO\"."),
     ("equipment", "equipment", "I can't create records myself — I only read your data. To add machinery: Equipment page → \"+ New Equipment\". To log usage: open a site → Equipment tab → Log Usage."),
     ("progress", "progress", "I can't create records myself — I only read your data. To track progress: open a site → Progress tab → add milestones and update their %."),
+    ("safety", "safety", "I can't create records myself — I only read your data. To log a safety incident: Safety page → \"+ Report Incident\", pick the site, type and severity."),
 ]
 
 
@@ -318,6 +324,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "safety"):
+            return self._answer_safety(context)
         if _has(q, "progress"):
             return self._answer_progress(context)
         if _has(q, "equipment"):
@@ -450,6 +458,18 @@ class RuleBasedAnswerProvider(AnswerProvider):
         wages = context.labour_wage_total()
         tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
         return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
+
+    def _answer_safety(self, context: AssistantContext) -> str:
+        s = context.safety_summary()
+        if s.total == 0:
+            return "No safety incidents logged — clean record so far. Log one from the Safety page if something happens."
+        parts = [f"Safety: {s.total} incident(s) logged, {s.open_count} still open."]
+        if s.days_since_last_incident is not None:
+            parts.append(f"Days since last incident: {s.days_since_last_incident}.")
+        if s.by_severity:
+            sev = ", ".join(f"{n} {name}" for name, n in s.by_severity.items())
+            parts.append(f"By severity: {sev}.")
+        return " ".join(parts)
 
     def _answer_progress(self, context: AssistantContext) -> str:
         sites = context.sites()
