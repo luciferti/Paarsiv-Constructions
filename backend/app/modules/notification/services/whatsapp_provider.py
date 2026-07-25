@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from app.core.config import get_settings
+from app.core.sfmc import SFMCError, get_sfmc_client
 
 settings = get_settings()
 
@@ -53,7 +54,49 @@ class TwilioWhatsAppProvider(WhatsAppProvider):
             return SendResult(status="failed", provider_used="twilio")
 
 
+class SFMCWhatsAppProvider(WhatsAppProvider):
+    """Sends WhatsApp via SFMC's messaging API using a message definition.
+
+    Uses the MobileConnect/GroupConnect message-send endpoint keyed by
+    `sfmc_whatsapp_definition_key`. If your SFMC WhatsApp channel uses a
+    different path, only this method needs to change.
+    """
+
+    def send(self, to_phone: str, message: str) -> SendResult:
+        definition_key = settings.sfmc_whatsapp_definition_key
+        if not definition_key:
+            return SendResult(status="failed", provider_used="sfmc")
+        payload = {
+            "definitionKey": definition_key,
+            "recipients": [
+                {
+                    "contactKey": to_phone,
+                    "to": to_phone,
+                    "attributes": {"body": message},
+                }
+            ],
+        }
+        try:
+            get_sfmc_client().post_json(
+                f"messaging/v1/messageDefinitionSends/key:{definition_key}/send", payload
+            )
+            return SendResult(status="sent", provider_used="sfmc")
+        except (SFMCError, Exception):
+            return SendResult(status="failed", provider_used="sfmc")
+
+
 def get_whatsapp_provider() -> WhatsAppProvider:
-    if settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_whatsapp_from:
+    provider = settings.messaging_provider.lower()
+    if provider == "logging":
+        return LoggingWhatsAppProvider()
+    # SFMC wins when explicitly selected, or in auto mode when its WhatsApp
+    # send definition is configured.
+    if provider == "sfmc" or (
+        provider == "auto" and settings.sfmc_configured and settings.sfmc_whatsapp_definition_key
+    ):
+        return SFMCWhatsAppProvider()
+    if provider in ("twilio", "auto") and (
+        settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_whatsapp_from
+    ):
         return TwilioWhatsAppProvider()
     return LoggingWhatsAppProvider()

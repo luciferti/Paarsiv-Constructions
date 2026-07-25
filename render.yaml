@@ -37,3 +37,23 @@ services:
       # e.g. https://your-app.vercel.app
       - key: FRONTEND_ORIGIN
         sync: false
+      # --- SFMC (Email + WhatsApp). See SFMC_SETUP.md. Fill in the
+      # dashboard; unset = features fall back to in-app logging. ---
+      - key: SFMC_SUBDOMAIN
+        sync: false
+      - key: SFMC_CLIENT_ID
+        sync: false
+      - key: SFMC_CLIENT_SECRET
+        sync: false
+      - key: SFMC_EMAIL_DEFINITION_KEY
+        sync: false
+      - key: SFMC_FROM_EMAIL
+        sync: false
+      - key: SFMC_FROM_NAME
+        sync: false
+      - key: SFMC_WHATSAPP_DEFINITION_KEY
+        sync: false
+      - key: MESSAGING_PROVIDER
+        value: auto
+      - key: WHATSAPP_DEFAULT_ORG_ID
+        sync: false
