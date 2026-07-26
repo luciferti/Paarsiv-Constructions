@@ -88,6 +88,8 @@ model Tenant {
   businessDescription  String?
   // How far through the setup wizard this workspace has got
   setupStep            Int      @default(0)
+  // Step trace from the last connect, kept so it survives the Meta redirect
+  lastSetupSteps       Json?
   // AI engine config
   aiSource       AiSource @default(OWN)
   aiEnabled      Boolean  @default(true)

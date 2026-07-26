@@ -106,12 +106,36 @@ export function isAppConfigured(tenant: Tenant): boolean {
   return !!(c.appId && c.appSecret && c.configId);
 }
 
-/** Step 1 — swap the popup's code for a business access token. */
+/** Where Meta sends the browser back to. Must match the app's allowed list. */
+export function redirectUri(): string {
+  return `${env.publicUrl.replace(/\/$/, "")}/api/whatsapp/callback`;
+}
+
+/**
+ * The Meta page we send the browser to. The whole of Embedded Signup happens
+ * on facebook.com; we get the browser back with a code on the query string.
+ */
+export function buildAuthUrl(tenant: Tenant, state: string): string {
+  const { appId, configId } = appConfigOf(tenant);
+  const version = tenant.graphVersion || env.graphVersion;
+  const url = new URL(`https://www.facebook.com/${version}/dialog/oauth`);
+  url.searchParams.set("client_id", appId);
+  url.searchParams.set("config_id", configId);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("override_default_response_type", "true");
+  url.searchParams.set("redirect_uri", redirectUri());
+  url.searchParams.set("state", state);
+  url.searchParams.set("extras", JSON.stringify({ setup: {}, featureType: "", sessionInfoVersion: "3" }));
+  return url.toString();
+}
+
+/** Step 1 — swap the returned code for a business access token. */
 export async function exchangeCode(tenant: Tenant, code: string): Promise<string> {
   const { appId, appSecret } = appConfigOf(tenant);
   const data = await graph<{ access_token: string }>("oauth/access_token", {
     version: tenant.graphVersion,
-    query: { client_id: appId, client_secret: appSecret, code },
+    // The redirect flow requires the same redirect_uri that started it.
+    query: { client_id: appId, client_secret: appSecret, code, redirect_uri: redirectUri() },
   });
   if (!data.access_token) {
     throw new MetaApiError({ message: "Meta returned no access token for that code." });
@@ -384,6 +408,7 @@ export async function completeSignup(
       connectedAt: new Date(),
       connectionError: null,
       setupStep: Math.max(tenant.setupStep, chosen ? 3 : 2),
+      lastSetupSteps: steps as object,
     },
   });
 
@@ -426,6 +451,8 @@ export interface ConnectionStatus {
   verifyToken?: string | null;
   connectedAt?: Date | null;
   error?: string | null;
+  /** The trace from the last connect attempt, so it survives the redirect. */
+  lastSteps?: { key: string; label: string; ok: boolean; detail?: string; error?: MetaError }[] | null;
   /** Live re-check against Meta, present only when asked for. */
   checks?: { key: string; label: string; ok: boolean; detail?: string; error?: MetaError }[];
 }
@@ -463,6 +490,7 @@ export function statusOf(tenant: Tenant, publicUrl: string): ConnectionStatus {
     verifyToken: tenant.verifyToken,
     connectedAt: tenant.connectedAt,
     error: tenant.connectionError,
+    lastSteps: (tenant.lastSetupSteps as ConnectionStatus["lastSteps"]) ?? null,
   };
 }
 

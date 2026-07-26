@@ -66,8 +66,10 @@ Create an app once at developers.facebook.com (type **Business**, product
    *WhatsApp Embedded Signup* and copy its **Configuration ID**. The permissions
    it requests must include `whatsapp_business_management`,
    `whatsapp_business_messaging` and `business_management`.
-3. **App settings → Basic → App Domains** and Facebook Login → *Valid OAuth
-   redirect URIs* — add the domain the platform is served from.
+3. Facebook Login → **Valid OAuth Redirect URIs** — add
+   `PUBLIC_URL/api/whatsapp/callback` exactly. This is the address Meta returns
+   the browser to, and the token exchange sends the same value, so a mismatch
+   fails the connection.
 4. **WhatsApp → Configuration** — set the callback URL and verify token shown on
    the Settings → WhatsApp screen, and subscribe to the `messages` field.
 5. Paste the App ID, App Secret and Configuration ID into Settings → WhatsApp.
@@ -82,10 +84,12 @@ as the callback URL. A localhost address will never receive a webhook.
 
 1. **Business details** — legal name, category, country, email, website, address.
    Stored locally and used to pre-fill the WhatsApp profile later.
-2. **Connect Meta** — Meta's window handles sign-in, the business portfolio and
-   creating the WhatsApp Business Account. The server then exchanges the code for
-   a business token, discovers the account, subscribes this server to its
-   webhooks and registers the number — each step reported on screen.
+2. **Connect Meta** — the browser is sent to facebook.com, where sign-in, the
+   business portfolio and creating the WhatsApp Business Account all happen.
+   Meta then returns the browser to `PUBLIC_URL/api/whatsapp/callback`, which
+   exchanges the code for a business token, discovers the account, subscribes
+   this server to its webhooks, registers the number, and finally sends the
+   browser back to the wizard with the step-by-step trace.
 3. **Phone number** — every number on the account with its verification state and
    quality rating. Unverified numbers get a code by SMS or voice call, entered
    right there; then the number is registered for sending.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, BadgeCheck, Building2, Check, Copy, Loader2, MessageSquareText, Phone,
@@ -38,6 +38,7 @@ interface Status {
   verifyToken?: string | null;
   connectedAt?: string | null;
   error?: string | null;
+  lastSteps?: Step[] | null;
 }
 interface NumberRow {
   id: string; displayPhoneNumber: string; verifiedName?: string;
@@ -46,13 +47,6 @@ interface NumberRow {
 interface Profile {
   about?: string; address?: string; description?: string;
   email?: string; websites?: string[]; vertical?: string; profilePictureUrl?: string;
-}
-
-declare global {
-  interface Window {
-    FB?: { init: (o: Record<string, unknown>) => void; login: (cb: (r: any) => void, o: Record<string, unknown>) => void };
-    fbAsyncInit?: () => void;
-  }
 }
 
 /** Meta's business categories, in the order their own picker shows them. */
@@ -175,12 +169,10 @@ export default function WhatsAppSetupPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [err, setErr] = useState<MetaErrorDetail | null>(null);
-  const [sdkReady, setSdkReady] = useState(false);
   const [showAppForm, setShowAppForm] = useState(false);
   const [appForm, setAppForm] = useState({ appId: "", appSecret: "", configId: "" });
   const [biz, setBiz] = useState<BusinessDetails>({});
   const [otp, setOtp] = useState({ phoneNumberId: "", method: "SMS" as "SMS" | "VOICE", code: "", requested: false });
-  const signupInfo = useRef<{ wabaId?: string; phoneNumberId?: string }>({});
 
   const load = useCallback(async () => {
     const r = await api.get<{ status: Status }>("/whatsapp/status");
@@ -188,6 +180,8 @@ export default function WhatsAppSetupPage() {
     setBiz((b) => (Object.keys(b).length ? b : r.status.business_details || {}));
     setAppForm((f) => ({ ...f, appId: r.status.appId || "", configId: r.status.configId || "" }));
     setStep((s) => (s > 1 ? s : Math.min(5, Math.max(1, r.status.setupStep + 1))));
+    // The trace was written before Meta redirected the browser away.
+    if (r.status.lastSteps?.length) setSteps(r.status.lastSteps);
     if (r.status.connected) {
       api.get<{ numbers: NumberRow[] }>("/whatsapp/numbers").then((n) => setNumbers(n.numbers)).catch(() => {});
       api.get<{ profile: Profile | null }>("/whatsapp/profile")
@@ -198,42 +192,16 @@ export default function WhatsAppSetupPage() {
   }, []);
   useEffect(() => { load().catch(() => {}); }, [load]);
 
-  // Meta's popup posts back which account and number the user picked.
+  // Meta sends the browser back here with ?setup= on the query string.
   useEffect(() => {
-    function onMessage(e: MessageEvent) {
-      try {
-        if (!/facebook\.com$/.test(new URL(e.origin).hostname)) return;
-        const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-        if (data?.type === "WA_EMBEDDED_SIGNUP" && data?.data) {
-          signupInfo.current = { wabaId: data.data.waba_id, phoneNumberId: data.data.phone_number_id };
-        }
-      } catch { /* not our message */ }
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    const q = new URLSearchParams(window.location.search);
+    const outcome = q.get("setup");
+    if (!outcome) return;
+    if (outcome === "connected") setNote("Connected. Meta sent you back — here's what happened.");
+    else if (outcome === "cancelled") setErr({ message: "You came back from Meta without finishing." });
+    else if (outcome === "error") setErr({ message: q.get("message") || "The connection failed." });
+    window.history.replaceState({}, "", window.location.pathname);
   }, []);
-
-  useEffect(() => {
-    if (!status?.appId || sdkReady) return;
-    const existing = document.getElementById("facebook-jssdk");
-    const init = () => {
-      window.FB?.init({ appId: status.appId, cookie: true, xfbml: false, version: "v21.0" });
-      setSdkReady(true);
-    };
-    if (existing && window.FB) { init(); return; }
-    window.fbAsyncInit = init;
-    if (!existing) {
-      const s = document.createElement("script");
-      s.id = "facebook-jssdk";
-      s.src = "https://connect.facebook.net/en_US/sdk.js";
-      s.async = true; s.defer = true; s.crossOrigin = "anonymous";
-      s.onerror = () => setErr({
-        message: "Couldn't load Facebook's sign-in window.",
-        hint: "An ad blocker or network rule is usually the cause — allow connect.facebook.net and reload.",
-      });
-      document.body.appendChild(s);
-    }
-  }, [status?.appId, sdkReady]);
 
   function failure(e: unknown, fallback: string) {
     const body = (e as ApiError & { body?: any })?.body;
@@ -276,44 +244,21 @@ export default function WhatsAppSetupPage() {
     finally { setBusy(null); }
   }
 
-  function connect() {
-    if (!window.FB || !status?.configId) return;
-    setErr(null); setSteps(null); signupInfo.current = {};
-    window.FB.login(
-      (response: any) => {
-        const code = response?.authResponse?.code;
-        if (!code) {
-          setErr({
-            message: "The Meta window closed before it finished.",
-            hint: "Run it again and complete every screen, including choosing a business and a number.",
-          });
-          return;
-        }
-        void finishConnect(code);
-      },
-      {
-        config_id: status.configId,
-        response_type: "code",
-        override_default_response_type: true,
-        extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
-      }
-    );
-  }
-
-  async function finishConnect(code: string) {
+  /**
+   * Hand the whole browser over to Meta. Everything happens on facebook.com,
+   * and Meta returns to our callback, which brings the browser back here.
+   */
+  async function connect() {
     setBusy("connect"); setErr(null);
     try {
-      const r = await api.post<{ status: Status; steps: Step[] }>("/whatsapp/connect", {
-        code,
-        wabaId: signupInfo.current.wabaId,
-        phoneNumberId: signupInfo.current.phoneNumberId,
-      });
-      setSteps(r.steps);
-      setStatus(r.status);
-      const fresh = await load();
-      setStep(fresh.number?.id ? 4 : 3);
-    } catch (e) { failure(e, "The connection failed."); }
-    finally { setBusy(null); }
+      const r = await api.get<{ url: string }>(
+        `/whatsapp/oauth/start?returnTo=${encodeURIComponent(window.location.origin)}`
+      );
+      window.location.href = r.url;
+    } catch (e) {
+      failure(e, "Could not start the Meta sign-in.");
+      setBusy(null);
+    }
   }
 
   async function requestCode() {
@@ -577,16 +522,16 @@ export default function WhatsAppSetupPage() {
                   </ul>
                 )}
                 <div className="mt-6 flex items-center justify-center gap-2">
-                  <button className={clsx(btnPri, "h-11 px-6 text-[15px]")} onClick={connect} disabled={!sdkReady || busy !== null}>
+                  <button className={clsx(btnPri, "h-11 px-6 text-[15px]")} onClick={connect} disabled={busy !== null}>
                     {busy === "connect" && <Loader2 className="w-4 h-4 inline mr-2 animate-spin" />}
-                    {busy === "connect" ? "Connecting…" : sdkReady ? (status.connected ? "Reconnect" : "Continue with Facebook") : "Loading Meta…"}
+                    {busy === "connect" ? "Taking you to Meta…" : status.connected ? "Reconnect" : "Continue with Facebook"}
                   </button>
                   {status.connected && <button className={btnGhost} onClick={() => setStep(3)}>Next</button>}
                 </div>
               </section>
             )}
 
-            {steps && step === 2 && <StepTrace steps={steps} title="What happened" />}
+            {steps && step <= 3 && <StepTrace steps={steps} title="What happened when you came back" />}
 
             {/* 3 — number */}
             {step === 3 && (

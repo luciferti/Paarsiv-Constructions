@@ -1,17 +1,21 @@
 import { Router } from "express";
 import { z } from "zod";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import { prisma } from "../lib/prisma";
 import { env } from "../lib/env";
 import { requireAuth, requirePermission } from "../middleware/auth";
-import { audit } from "../lib/audit";
+import { audit, auditRaw } from "../lib/audit";
 import {
   MetaApiError,
   StepFailure,
+  buildAuthUrl,
   completeSignup,
   getBusinessProfile,
+  isAppConfigured,
   isSubscribed,
   listPhoneNumbers,
+  redirectUri,
   registerNumber,
   requestVerificationCode,
   setBusinessProfile,
@@ -22,7 +26,107 @@ import {
 } from "../services/metaOnboarding";
 
 export const whatsappRouter = Router();
+
+const allowedOrigins = () =>
+  env.webOrigin.split(",").map((o) => o.trim().replace(/\/$/, "")).filter(Boolean);
+
+/**
+ * Only ever send the browser back to an origin we already trust — the return
+ * address rides in the signed state, but it is still checked against the
+ * allow-list so a stolen state can't redirect anyone elsewhere.
+ */
+function safeOrigin(candidate?: string): string {
+  const list = allowedOrigins();
+  const wanted = (candidate || "").trim().replace(/\/$/, "");
+  return list.includes(wanted) ? wanted : list[0] || "";
+}
+
+/** Where the browser lands back in the app after Meta is done with it. */
+function appReturnUrl(origin: string, params: Record<string, string>): string {
+  const url = new URL(`${safeOrigin(origin)}/settings/whatsapp`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  return url.toString();
+}
+
+/**
+ * GET /whatsapp/callback — Meta sends the browser here when signup finishes.
+ *
+ * Public on purpose: it's a top-level redirect, so there's no Authorization
+ * header to read. The signed `state` carries which workspace started it and
+ * expires quickly, which is also what stops anyone else driving this endpoint.
+ */
+whatsappRouter.get("/callback", async (req, res) => {
+  const { code, state, error_description: metaError } = req.query as Record<string, string | undefined>;
+
+  // Decoded first so even a failure can go back to the right place.
+  let tenantId = "";
+  let origin = "";
+  try {
+    const payload = jwt.verify(state || "", env.jwtSecret) as {
+      tenantId?: string; purpose?: string; origin?: string;
+    };
+    if (payload.purpose === "wa_oauth" && payload.tenantId) {
+      tenantId = payload.tenantId;
+      origin = payload.origin || "";
+    }
+  } catch { /* handled below */ }
+
+  if (metaError) {
+    return res.redirect(appReturnUrl(origin, { setup: "error", message: metaError }));
+  }
+  if (!code) {
+    return res.redirect(appReturnUrl(origin, { setup: "cancelled" }));
+  }
+  if (!tenantId) {
+    return res.redirect(appReturnUrl(origin, { setup: "error", message: "That sign-in link expired — start again." }));
+  }
+
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  if (!tenant) return res.redirect(appReturnUrl(origin, { setup: "error", message: "Workspace not found." }));
+
+  try {
+    const result = await completeSignup(tenant, { code });
+    auditRaw(tenant.id, "whatsapp.connected", {
+      meta: { wabaId: result.wabaId, phoneNumberId: result.phoneNumberId, via: "redirect" },
+    });
+    return res.redirect(appReturnUrl(origin, { setup: "connected" }));
+  } catch (e) {
+    const message =
+      e instanceof StepFailure ? e.message
+      : e instanceof MetaApiError ? e.detail.message
+      : (e as Error).message || "The connection failed.";
+    const steps = e instanceof StepFailure ? e.steps : [];
+    await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: { connectionError: message, lastSetupSteps: steps as object },
+    });
+    return res.redirect(appReturnUrl(origin, { setup: "error", message }));
+  }
+});
+
 whatsappRouter.use(requireAuth);
+
+/**
+ * GET /whatsapp/oauth/start — the Meta URL to send the browser to, with a
+ * short-lived signed state so the callback knows who came back.
+ */
+whatsappRouter.get("/oauth/start", requirePermission("settings.manage"), async (req, res) => {
+  const tenant = await tenantOf(req);
+  if (!isAppConfigured(tenant)) {
+    return res.status(400).json({ error: "Add the Meta app details before connecting." });
+  }
+  const state = jwt.sign(
+    {
+      tenantId: tenant.id,
+      uid: req.auth!.uid,
+      purpose: "wa_oauth",
+      origin: safeOrigin(typeof req.query.returnTo === "string" ? req.query.returnTo : undefined),
+    },
+    env.jwtSecret,
+    { expiresIn: "15m" }
+  );
+  res.json({ url: buildAuthUrl(tenant, state), redirectUri: redirectUri() });
+});
 
 async function tenantOf(req: any) {
   return prisma.tenant.findUniqueOrThrow({ where: { id: req.auth!.tenantId } });

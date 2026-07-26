@@ -64,6 +64,8 @@ export const openapiSpec = {
       get: { summary: "Public WhatsApp business profile", responses: { "200": { description: "profile" } } },
       post: { summary: "Update the public profile", responses: { "200": { description: "status" } } },
     },
+    "/whatsapp/oauth/start": { get: { summary: "Meta sign-in URL to redirect the browser to (signed state carries the return address)", responses: { "200": { description: "url + redirectUri" } } } },
+    "/whatsapp/callback": { get: { summary: "Public — Meta returns the browser here; finishes signup and redirects back to the app", security: [], responses: { "302": { description: "redirect to /settings/whatsapp?setup=…" } } } },
     "/whatsapp/connect": { post: { summary: "Finish Embedded Signup from the popup's code", responses: { "200": { description: "status + per-step trace" }, "400": { description: "Meta error with code, hint and fbtrace_id" } } } },
     "/whatsapp/verify": { post: { summary: "Re-run live checks against Meta", responses: { "200": { description: "checks" } } } },
     "/whatsapp/repair": { post: { summary: "Re-subscribe the webhook", responses: { "200": { description: "status" } } } },
