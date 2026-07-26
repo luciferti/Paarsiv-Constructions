@@ -95,6 +95,7 @@ export default function ContactsPage() {
   const [fields, setFields] = useState<ContactField[]>([]);
   const [activeSeg, setActiveSeg] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [view, setView] = useState<"contacts" | "segments">("contacts"); // main-area mode
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState<DrawerKind>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -292,13 +293,14 @@ export default function ContactsPage() {
   const headerDesc = activeSegment ? describeRules(activeSegment, fields) : "Everyone in your workspace";
 
   function SegRow({ s, nested }: { s: Segment; nested?: boolean }) {
+    const active = view === "contacts" && activeSeg === s.id;
     return (
       <button
-        onClick={() => setActiveSeg(s.id)}
+        onClick={() => { setActiveSeg(s.id); setView("contacts"); }}
         className={clsx(
           "w-full flex items-center gap-2 h-8 rounded-lg text-[13px] pr-2",
           nested ? "pl-8" : "pl-3",
-          activeSeg === s.id ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:bg-muted"
+          active ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:bg-muted"
         )}
       >
         <Filter className="w-3.5 h-3.5 shrink-0" />
@@ -313,10 +315,10 @@ export default function ContactsPage() {
       {/* Sidebar */}
       <aside className="w-60 shrink-0 border-r bg-card flex flex-col p-2.5 min-h-0">
         <button
-          onClick={() => setActiveSeg("")}
+          onClick={() => { setActiveSeg(""); setView("contacts"); }}
           className={clsx(
             "flex items-center gap-2 h-9 px-3 rounded-lg text-[13px]",
-            activeSeg === "" ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:bg-muted"
+            view === "contacts" && activeSeg === "" ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:bg-muted"
           )}
         >
           <Users className="w-4 h-4" />
@@ -324,15 +326,27 @@ export default function ContactsPage() {
           <span className="text-[11px]">{allCount}</span>
         </button>
 
-        <div className="flex items-center justify-between px-3 pt-4 pb-1.5">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Segments</span>
+        <div className={clsx(
+          "flex items-center justify-between pl-3 pr-2 h-8 mt-3 mb-0.5 rounded-lg cursor-pointer group/seghead",
+          view === "segments" ? "bg-accent" : "hover:bg-muted"
+        )}>
+          <button
+            onClick={() => setView("segments")}
+            className={clsx(
+              "flex-1 text-left text-[11px] font-semibold uppercase tracking-wide",
+              view === "segments" ? "text-accent-foreground" : "text-muted-foreground group-hover/seghead:text-foreground"
+            )}
+            title="View all segments"
+          >
+            Segments <span className="normal-case font-normal">({segments.length})</span>
+          </button>
           {canEdit && (
             <span className="flex gap-2 text-muted-foreground">
               <FolderPlus
                 className="w-4 h-4 cursor-pointer hover:text-primary"
-                onClick={() => { const n = prompt("Folder name:"); if (n?.trim()) api.post("/segment-folders", { name: n.trim() }).then(loadFolders); }}
+                onClick={(e) => { e.stopPropagation(); const n = prompt("Folder name:"); if (n?.trim()) api.post("/segment-folders", { name: n.trim() }).then(loadFolders); }}
               />
-              <Plus className="w-4 h-4 cursor-pointer hover:text-primary" onClick={openNewSegment} />
+              <Plus className="w-4 h-4 cursor-pointer hover:text-primary" onClick={(e) => { e.stopPropagation(); openNewSegment(); }} />
             </span>
           )}
         </div>
@@ -379,6 +393,77 @@ export default function ContactsPage() {
 
       {/* Main */}
       <section className="flex-1 min-w-0 flex flex-col bg-background">
+        {view === "segments" && (
+          <>
+            <div className="px-6 py-4 border-b bg-card/50 flex items-center gap-3">
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h1 className="text-lg font-semibold">Segments</h1>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full border text-muted-foreground">{segments.length}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">Saved audience filters — click one to see its contacts</p>
+              </div>
+              <div className="flex-1" />
+              {canEdit && <button className={btnPri} onClick={openNewSegment}><Plus className="w-3 h-3 inline mr-1" />Create segment</button>}
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              {folders.map((f) => {
+                const segs = grouped.byFolder.get(f.id) || [];
+                if (!segs.length) return null;
+                return (
+                  <div key={f.id}>
+                    <div className="flex items-center gap-2 mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <FolderIcon className="w-3.5 h-3.5" />{f.name}
+                    </div>
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
+                      {segs.map((s) => (
+                        <div key={s.id} className="rounded-xl border bg-card shadow-card p-4">
+                          <button className="text-sm font-semibold text-primary hover:underline" onClick={() => { setActiveSeg(s.id); setView("contacts"); }}>
+                            {s.name}
+                          </button>
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{describeRules(s, fields)}</p>
+                          <div className="flex items-center gap-2 mt-3">
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent text-accent-foreground font-medium">{s.count} contacts</span>
+                            <div className="flex-1" />
+                            {canEdit && <button className={btnGhost} onClick={() => openEditSegment(s)}>Edit</button>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {grouped.ungrouped.length > 0 && (
+                <div>
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">No folder</div>
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
+                    {grouped.ungrouped.map((s) => (
+                      <div key={s.id} className="rounded-xl border bg-card shadow-card p-4">
+                        <button className="text-sm font-semibold text-primary hover:underline" onClick={() => { setActiveSeg(s.id); setView("contacts"); }}>
+                          {s.name}
+                        </button>
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{describeRules(s, fields)}</p>
+                        <div className="flex items-center gap-2 mt-3">
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent text-accent-foreground font-medium">{s.count} contacts</span>
+                          <div className="flex-1" />
+                          {canEdit && <button className={btnGhost} onClick={() => openEditSegment(s)}>Edit</button>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {segments.length === 0 && (
+                <div className="text-center py-16">
+                  <p className="text-sm text-muted-foreground mb-3">No segments yet.</p>
+                  {canEdit && <button className={btnPri} onClick={openNewSegment}><Plus className="w-3 h-3 inline mr-1" />Create your first segment</button>}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {view === "contacts" && (<>
         <div className="px-6 py-4 border-b bg-card/50 flex items-start gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
@@ -466,6 +551,7 @@ export default function ContactsPage() {
             </table>
           </div>
         </div>
+        </>)}
       </section>
 
       {/* Drawer */}
