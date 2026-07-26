@@ -71,6 +71,8 @@ model Tenant {
   systemPrompt   String?  // optional override; else built from knowledge+projects
   // Duplicate-merge rules: { phoneSuffix, email, externalId, nameCity, survivor }
   mergeRules     Json?
+  // Opt-out compliance: { enabled, optOutKeywords[], optInKeywords[], optOutReply, optInReply }
+  consentRules   Json?
   createdAt      DateTime @default(now())
 
   users          User[]
@@ -282,6 +284,10 @@ model Contact {
   tags       String[] @default([])
   attributes Json?    // free-form custom fields
   optedIn    Boolean  @default(true) // WhatsApp marketing opt-in
+  // Consent trail — who changed it and when, so an opt-out is defensible.
+  optedOutAt   DateTime?
+  optedInAt    DateTime?
+  consentSource String?  // customer_keyword | agent | import | api
   source     String   @default("manual") // manual | inbound | import
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt

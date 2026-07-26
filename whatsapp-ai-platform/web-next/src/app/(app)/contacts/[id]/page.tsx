@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Archive, Ban, Bot, Briefcase, Building2, CheckCheck, CircleCheck,
   Clock, Globe, Languages, Loader2, Mail, MapPin, MessageSquare, Pencil,
-  PhoneCall, Send, Sparkles, StickyNote, Tag as TagIcon, Timer, User as UserIcon,
+  PhoneCall, Send, ShieldCheck, Sparkles, StickyNote, Tag as TagIcon, Timer, User as UserIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
@@ -114,6 +114,11 @@ export default function Contact360Page() {
     await api.patch(`/contacts/${id}`, { status });
     load();
   }
+  async function setConsent(optedIn: boolean) {
+    if (!optedIn && !confirm("Mark this contact as opted out? They'll be left out of every campaign and journey.")) return;
+    await api.patch(`/contacts/${id}`, { optedIn });
+    load();
+  }
   async function analyze() {
     if (!data?.conversation || analyzing) return;
     setAnalyzing(true);
@@ -163,8 +168,18 @@ export default function Contact360Page() {
                 c.status === "blocked" ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground"
               )}>{c.status}</span>
               <span className="text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground capitalize">{c.source}</span>
-              {c.optedIn && <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent text-accent-foreground">opted-in</span>}
+              <span className={clsx(
+                "text-[11px] px-2 py-0.5 rounded-full",
+                c.optedIn ? "bg-accent text-accent-foreground" : "bg-destructive/15 text-destructive font-medium"
+              )}>{c.optedIn ? "opted-in" : "opted out"}</span>
             </div>
+            {!c.optedIn && (
+              <p className="text-[11px] text-destructive mt-2 leading-relaxed">
+                Excluded from campaigns and journeys
+                {c.optedOutAt ? ` since ${new Date(c.optedOutAt).toLocaleDateString()}` : ""}
+                {c.consentSource === "customer_keyword" ? ", at their own request." : "."}
+              </p>
+            )}
           </div>
           {/* quick actions */}
           <div className="grid grid-cols-2 gap-2 mt-4">
@@ -182,6 +197,11 @@ export default function Contact360Page() {
             )}
             {canEdit && c.status !== "active" && (
               <button className={btnGhost} onClick={() => setStatus("active")}><CircleCheck className="w-3 h-3 inline mr-1" />Activate</button>
+            )}
+            {canEdit && (
+              <button className={btnGhost} onClick={() => setConsent(!c.optedIn)}>
+                <ShieldCheck className="w-3 h-3 inline mr-1" />{c.optedIn ? "Opt out" : "Opt in"}
+              </button>
             )}
           </div>
         </div>

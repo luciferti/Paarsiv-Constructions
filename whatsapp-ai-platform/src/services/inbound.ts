@@ -3,6 +3,8 @@ import { emitRealtime } from "../lib/events";
 import { generateReply } from "../ai";
 import { triggerNewContactJourneys, tryTriggerJourney } from "./journeys";
 import { sendWhatsAppText } from "./whatsapp";
+import { applyConsent, classify } from "./consent";
+import { auditRaw } from "../lib/audit";
 import type { Tenant, Conversation } from "@prisma/client";
 
 const PREVIEW_LEN = 120;
@@ -77,9 +79,12 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
 
   const conv = await upsertConversation(tenant.id, msg.phone, msg.customerName);
 
-  // Every inbound customer becomes a Contact (marketing audience).
+  const consentAction = classify(tenant, msg.text);
+
+  // Every inbound customer becomes a Contact (marketing audience) — but if
+  // their very first words are "STOP", a welcome journey must not fire.
   const isNewContact = await upsertContact(tenant.id, msg.phone, msg.customerName);
-  if (isNewContact) {
+  if (isNewContact && !consentAction) {
     triggerNewContactJourneys(tenant, msg.phone, msg.customerName).catch(() => {});
   }
 
@@ -112,6 +117,17 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
     message: inbound,
   });
   emitRealtime({ tenantId: tenant.id, type: "conversation", conversation: updatedConv });
+
+  // Consent comes first: "STOP" must be honoured even in a human-owned thread,
+  // and it must not fall through to an AI reply or a journey.
+  if (consentAction) {
+    const { reply } = await applyConsent(tenant, msg.phone, consentAction);
+    await sendReply(tenant, updatedConv, reply, "AI");
+    auditRaw(tenant.id, consentAction === "opt_out" ? "contact.opt_out" : "contact.opt_in", {
+      meta: { phone: msg.phone, via: "keyword", text: msg.text },
+    });
+    return;
+  }
 
   // Auto-reply only when the conversation is still AI-owned.
   if (updatedConv.mode !== "AI") return;

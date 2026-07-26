@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAuth, requirePermission } from "../middleware/auth";
 import { audit } from "../lib/audit";
+import { consentRulesOf } from "../services/consent";
 
 export const settingsRouter = Router();
 settingsRouter.use(requireAuth);
@@ -28,6 +29,7 @@ function maskTenant(t: any) {
     claudeKey: mask(t.claudeKey),
     openaiKey: mask(t.openaiKey),
     mergeRules: t.mergeRules ?? null,
+    consentRules: consentRulesOf(t),
   };
 }
 
@@ -68,6 +70,15 @@ const updateSchema = z.object({
       survivor: z.enum(["mostActive", "oldest"]),
     })
     .optional(),
+  consentRules: z
+    .object({
+      enabled: z.boolean(),
+      optOutKeywords: z.array(z.string()).max(30),
+      optInKeywords: z.array(z.string()).max(30),
+      optOutReply: z.string().max(1000),
+      optInReply: z.string().max(1000),
+    })
+    .optional(),
   // Secrets: only applied if a non-empty value is provided.
   claudeKey: z.string().optional(),
   openaiKey: z.string().optional(),
@@ -99,6 +110,7 @@ settingsRouter.patch("/", requirePermission("settings.manage"), async (req, res)
   for (const k of passthrough) if (d[k] !== undefined) data[k] = d[k];
   if (d.systemPrompt !== undefined) data.systemPrompt = d.systemPrompt;
   if (d.mergeRules !== undefined) data.mergeRules = d.mergeRules;
+  if (d.consentRules !== undefined) data.consentRules = d.consentRules;
 
   const secrets = ["claudeKey", "openaiKey", "whatsappToken", "verifyToken", "phoneNumberId", "wabaId"] as const;
   for (const k of secrets) if (d[k] && d[k]!.trim()) data[k] = d[k]!.trim();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, GitMerge, KeyRound, ScrollText, Webhook } from "lucide-react";
+import { Copy, GitMerge, KeyRound, ScrollText, ShieldCheck, Webhook } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import type { ContactField } from "@/lib/types";
@@ -46,7 +46,34 @@ const DEFAULT_RULES: MergeRules = {
   phoneSuffix: true, email: true, externalId: true, nameCity: false, customFields: [], survivor: "mostActive",
 };
 
-type Tab = "keys" | "merge" | "audit" | "webhooks";
+interface ConsentRules {
+  enabled: boolean;
+  optOutKeywords: string[];
+  optInKeywords: string[];
+  optOutReply: string;
+  optInReply: string;
+}
+const DEFAULT_CONSENT: ConsentRules = {
+  enabled: true,
+  optOutKeywords: ["stop", "unsubscribe"],
+  optInKeywords: ["start", "subscribe"],
+  optOutReply: "",
+  optInReply: "",
+};
+
+type Tab = "keys" | "merge" | "consent" | "audit" | "webhooks";
+
+/** Comma-separated editing for a keyword list — one input, no chip fiddling. */
+function KeywordInput({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder: string }) {
+  return (
+    <input
+      className={clsx(inputCls, "w-full")}
+      value={value.join(", ")}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+    />
+  );
+}
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>("keys");
@@ -56,15 +83,20 @@ export default function SettingsPage() {
   const [keyName, setKeyName] = useState("");
   const [freshSecret, setFreshSecret] = useState<string | null>(null);
   const [rules, setRules] = useState<MergeRules>(DEFAULT_RULES);
+  const [consent, setConsent] = useState<ConsentRules>(DEFAULT_CONSENT);
   const [fields, setFields] = useState<ContactField[]>([]);
   const [rulesSaved, setRulesSaved] = useState(false);
+  const [consentSaved, setConsentSaved] = useState(false);
 
   const load = useCallback(() => {
     api.get<{ keys: ApiKeyRow[] }>("/api-keys").then((r) => setKeys(r.keys)).catch(() => {});
     api.get<{ logs: AuditRow[] }>("/logs/audit").then((r) => setAudit(r.logs)).catch(() => {});
     api.get<{ logs: WebhookRow[] }>("/logs/webhooks").then((r) => setWebhooks(r.logs)).catch(() => {});
-    api.get<{ tenant: { mergeRules?: Partial<MergeRules> | null } }>("/settings")
-      .then((r) => setRules({ ...DEFAULT_RULES, ...(r.tenant.mergeRules || {}) })).catch(() => {});
+    api.get<{ tenant: { mergeRules?: Partial<MergeRules> | null; consentRules?: Partial<ConsentRules> | null } }>("/settings")
+      .then((r) => {
+        setRules({ ...DEFAULT_RULES, ...(r.tenant.mergeRules || {}) });
+        setConsent({ ...DEFAULT_CONSENT, ...(r.tenant.consentRules || {}) });
+      }).catch(() => {});
     api.get<{ fields: ContactField[] }>("/contact-fields").then((r) => setFields(r.fields)).catch(() => {});
   }, []);
   useEffect(load, [load]);
@@ -73,6 +105,12 @@ export default function SettingsPage() {
     await api.patch("/settings", { mergeRules: rules });
     setRulesSaved(true);
     setTimeout(() => setRulesSaved(false), 1800);
+  }
+
+  async function saveConsent() {
+    await api.patch("/settings", { consentRules: consent });
+    setConsentSaved(true);
+    setTimeout(() => setConsentSaved(false), 1800);
   }
 
   async function createKey() {
@@ -86,6 +124,7 @@ export default function SettingsPage() {
   const TABS: { v: Tab; label: string; icon: React.ElementType }[] = [
     { v: "keys", label: "API keys", icon: KeyRound },
     { v: "merge", label: "Merge rules", icon: GitMerge },
+    { v: "consent", label: "Opt-out rules", icon: ShieldCheck },
     { v: "audit", label: "Audit log", icon: ScrollText },
     { v: "webhooks", label: "Webhook logs", icon: Webhook },
   ];
@@ -253,6 +292,73 @@ export default function SettingsPage() {
                 <button className={btnPri} onClick={saveRules}>Save rules</button>
                 {rulesSaved && <span className="text-xs text-primary font-medium">Saved ✓</span>}
                 <span className="text-xs text-muted-foreground ml-auto">Merges are always human-confirmed — never automatic.</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "consent" && (
+          <div className="max-w-2xl space-y-4">
+            <div className="rounded-xl border bg-card shadow-card p-6 space-y-5">
+              <div>
+                <h2 className="text-[15px] font-semibold">Opt-out handling</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  When a customer asks to stop, WhatsApp expects it honoured immediately — no agent in the
+                  loop. Opted-out contacts are excluded from every campaign and journey.
+                </p>
+              </div>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" checked={consent.enabled}
+                  onChange={(e) => setConsent({ ...consent, enabled: e.target.checked })} />
+                <span>
+                  <span className="text-sm font-medium">Act on opt-out keywords automatically</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Turning this off means opt-outs have to be recorded by hand on each contact.
+                  </span>
+                </span>
+              </label>
+
+              <div className={clsx("space-y-4", !consent.enabled && "opacity-50 pointer-events-none")}>
+                <div>
+                  <div className="text-sm font-medium mb-1.5">Opt-out keywords</div>
+                  <KeywordInput value={consent.optOutKeywords} placeholder="stop, unsubscribe, band karo"
+                    onChange={(v) => setConsent({ ...consent, optOutKeywords: v })} />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Matched when the message is the phrase, or starts with it — so &quot;don&apos;t stop sending
+                    photos&quot; is left alone.
+                  </p>
+                </div>
+
+                <div>
+                  <div className="text-sm font-medium mb-1.5">Reply after opting out</div>
+                  <textarea
+                    className={clsx(inputCls, "w-full h-20 py-2 resize-none")}
+                    value={consent.optOutReply}
+                    onChange={(e) => setConsent({ ...consent, optOutReply: e.target.value })}
+                  />
+                </div>
+
+                <div className="pt-2 border-t">
+                  <div className="text-sm font-medium mb-1.5">Opt-in keywords</div>
+                  <KeywordInput value={consent.optInKeywords} placeholder="start, subscribe, chalu karo"
+                    onChange={(v) => setConsent({ ...consent, optInKeywords: v })} />
+                </div>
+
+                <div>
+                  <div className="text-sm font-medium mb-1.5">Reply after opting back in</div>
+                  <textarea
+                    className={clsx(inputCls, "w-full h-20 py-2 resize-none")}
+                    value={consent.optInReply}
+                    onChange={(e) => setConsent({ ...consent, optInReply: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button className={btnPri} onClick={saveConsent}>Save opt-out rules</button>
+                {consentSaved && <span className="text-xs text-primary font-medium">Saved ✓</span>}
+                <span className="text-xs text-muted-foreground ml-auto">Every change is written to the audit log.</span>
               </div>
             </div>
           </div>

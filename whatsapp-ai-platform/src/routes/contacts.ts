@@ -228,7 +228,19 @@ contactsRouter.patch("/:id", requirePermission("contacts.edit"), async (req, res
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });
   if (!c) return res.status(404).json({ error: "not found" });
-  const contact = await prisma.contact.update({ where: { id: c.id }, data: parsed.data });
+
+  // Changing consent by hand leaves the same trail a customer keyword would.
+  const data: any = { ...parsed.data };
+  if (parsed.data.optedIn !== undefined && parsed.data.optedIn !== c.optedIn) {
+    data.consentSource = "agent";
+    if (parsed.data.optedIn) data.optedInAt = new Date();
+    else data.optedOutAt = new Date();
+    audit(req, parsed.data.optedIn ? "contact.opt_in" : "contact.opt_out", {
+      entity: "contact", entityId: c.id, meta: { phone: c.phone, via: "agent" },
+    });
+  }
+
+  const contact = await prisma.contact.update({ where: { id: c.id }, data });
   audit(req, "contact.update", { entity: "contact", entityId: c.id, meta: { fields: Object.keys(parsed.data) } });
   res.json({ contact });
 });
@@ -431,12 +443,18 @@ contactsRouter.post("/bulk", requirePermission("contacts.edit"), async (req, res
       affected = (await prisma.contact.deleteMany({ where: { tenantId, id: { in: ids } } })).count;
       break;
     case "optIn":
-    case "optOut":
+    case "optOut": {
+      const optedIn = body.action === "optIn";
       affected = (await prisma.contact.updateMany({
         where: { tenantId, id: { in: ids } },
-        data: { optedIn: body.action === "optIn" },
+        data: {
+          optedIn,
+          consentSource: "agent",
+          ...(optedIn ? { optedInAt: new Date() } : { optedOutAt: new Date() }),
+        },
       })).count;
       break;
+    }
     case "status":
       affected = (await prisma.contact.updateMany({
         where: { tenantId, id: { in: ids } },

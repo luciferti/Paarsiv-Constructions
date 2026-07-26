@@ -52,6 +52,9 @@ export interface Contact {
   tags: string[];
   attributes?: Record<string, string> | null;
   optedIn: boolean;
+  optedOutAt?: string | null;
+  optedInAt?: string | null;
+  consentSource?: string | null;
   source: string;
   createdAt: string;
 }
