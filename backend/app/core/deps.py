@@ -44,6 +44,7 @@ class CurrentUser:
     id: str
     org_id: str
     permissions: object
+    role: str = "admin"
 
 
 def get_current_user(
@@ -51,7 +52,9 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> CurrentUser:
     if settings.demo_mode:
-        return CurrentUser(id=_DEMO_USER_ID, org_id=_DEMO_ORG_ID, permissions=_DEMO_PERMISSIONS)
+        return CurrentUser(
+            id=_DEMO_USER_ID, org_id=_DEMO_ORG_ID, permissions=_DEMO_PERMISSIONS, role="admin"
+        )
 
     if credentials is None:
         raise HTTPException(
@@ -76,7 +79,14 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         )
 
-    return CurrentUser(id=str(user.id), org_id=str(user.org_id), permissions=_AllPermissions())
+    from app.core.permissions import permissions_for_role
+
+    return CurrentUser(
+        id=str(user.id),
+        org_id=str(user.org_id),
+        permissions=permissions_for_role(user.role),
+        role=user.role,
+    )
 
 
 def require_permission(permission: str):

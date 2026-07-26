@@ -67,6 +67,15 @@ export function Sidebar() {
             {link.label}
           </Link>
         ))}
+        {user?.role === "admin" && (
+          <Link
+            href="/team"
+            className={`nav-item${pathname?.startsWith("/team") ? " active" : ""}`}
+          >
+            <span className="dot" aria-hidden="true" />
+            Team
+          </Link>
+        )}
       </nav>
 
       <div className="nav-section">
