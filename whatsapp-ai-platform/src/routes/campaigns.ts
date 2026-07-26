@@ -25,7 +25,7 @@ async function audienceCount(tenantId: string, segmentId: string | null): Promis
 }
 
 /** GET /campaigns — list with template/segment names. */
-campaignsRouter.get("/", async (req, res) => {
+campaignsRouter.get("/", requirePermission("campaigns.view"), async (req, res) => {
   const paging = parsePaging(req, 25);
   const range = dateFilter(parseRange(req));
   const where = { tenantId: req.auth!.tenantId, ...(range ? { createdAt: range } : {}) };
@@ -50,7 +50,7 @@ campaignsRouter.get("/", async (req, res) => {
 });
 
 /** GET /campaigns/:id — one campaign + its recipients. */
-campaignsRouter.get("/:id", async (req, res) => {
+campaignsRouter.get("/:id", requirePermission("campaigns.view"), async (req, res) => {
   const paging = parsePaging(req, 50);
   const c = await prisma.campaign.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },

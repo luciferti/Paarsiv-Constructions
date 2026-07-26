@@ -28,11 +28,16 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     try {
       const key = await prisma.apiKey.findUnique({ where: { keyHash: sha256(token) } });
       if (!key || key.revokedAt) return res.status(401).json({ error: "invalid api key" });
+      // A key with no scopes keeps full tenant access; one with scopes is
+      // limited to exactly those, regardless of the admin role it carries.
+      const scoped = key.scopes.length > 0;
       req.auth = {
         uid: `apikey:${key.id}`,
         tenantId: key.tenantId,
         role: "ADMIN",
         username: `api:${key.name}`,
+        permissions: scoped ? key.scopes : undefined,
+        strict: scoped,
       };
       req.viaApiKey = true;
       // Best-effort usage stamp; don't block the request on it.
@@ -60,7 +65,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 export function requirePermission(permission: string) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.auth) return res.status(401).json({ error: "unauthenticated" });
-    if (!can({ role: req.auth.role, permissions: req.auth.permissions }, permission)) {
+    if (!can({ role: req.auth.role, permissions: req.auth.permissions, strict: req.auth.strict }, permission)) {
       return res.status(403).json({ error: `missing permission: ${permission}` });
     }
     next();

@@ -9,6 +9,8 @@ export interface AuthPayload {
   username: string;
   /** Explicit grants; empty/absent means the role defaults apply. */
   permissions?: string[];
+  /** Set for scoped API keys: `permissions` is the complete allow-list. */
+  strict?: boolean;
 }
 
 export function signToken(payload: AuthPayload): string {

@@ -26,7 +26,7 @@ export const assetsRouter = Router();
 assetsRouter.use(requireAuth);
 
 /** GET /assets — media library, optionally filtered by ?folderId=. */
-assetsRouter.get("/", async (req, res) => {
+assetsRouter.get("/", requirePermission("media.manage"), async (req, res) => {
   const folderId = typeof req.query.folderId === "string" && req.query.folderId ? req.query.folderId : undefined;
   const paging = parsePaging(req, 24);
   const where = { tenantId: req.auth!.tenantId, ...(folderId ? { folderId } : {}) };

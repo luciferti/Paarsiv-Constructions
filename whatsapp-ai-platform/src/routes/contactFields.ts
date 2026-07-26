@@ -16,7 +16,7 @@ function toKey(label: string): string {
 }
 
 /** GET /contact-fields — tenant's custom field definitions. */
-contactFieldsRouter.get("/", async (req, res) => {
+contactFieldsRouter.get("/", requirePermission("contacts.view"), async (req, res) => {
   const fields = await prisma.contactField.findMany({
     where: { tenantId: req.auth!.tenantId },
     orderBy: { createdAt: "asc" },

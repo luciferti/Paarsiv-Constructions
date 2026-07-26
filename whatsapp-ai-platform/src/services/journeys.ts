@@ -34,7 +34,7 @@ async function resolveMessage(
 export async function runJourney(
   tenant: Tenant,
   steps: JourneyStep[],
-  ctx: { name?: string | null; phone: string },
+  ctx: { name?: string | null; phone: string; phoneNumberId?: string },
   opts: { ignoreWaits?: boolean } = {}
 ) {
   for (const step of steps) {
@@ -46,13 +46,19 @@ export async function runJourney(
     }
     if (step.type === "message") {
       const text = await resolveMessage(tenant.id, step, ctx);
-      if (text) await sendOutbound(tenant, ctx.phone, text, "AI");
+      // Messages leave from the journey's channel so the whole flow stays in
+      // one thread on the customer's phone.
+      if (text) await sendOutbound(tenant, ctx.phone, text, "AI", ctx.phoneNumberId);
       continue;
     }
     if (step.type === "handoff") {
       // Stop AI auto-replies for this conversation so a human takes over.
       await prisma.conversation.updateMany({
-        where: { tenantId: tenant.id, phone: ctx.phone },
+        where: {
+          tenantId: tenant.id,
+          phone: ctx.phone,
+          ...(ctx.phoneNumberId ? { phoneNumberId: ctx.phoneNumberId } : {}),
+        },
         data: { mode: "HUMAN" },
       });
       continue;
@@ -101,6 +107,8 @@ export interface JourneyContext {
   name?: string | null;
   triggerText?: string; // the inbound message that started the journey
   startedAt?: Date;
+  /** The channel the journey runs on; messages leave from this number. */
+  phoneNumberId?: string;
 }
 
 /** Evaluate a condition node against the contact/conversation right now. */
@@ -206,7 +214,12 @@ export async function runJourneyGraph(
           templateId: typeof data.templateId === "string" && data.templateId ? data.templateId : undefined,
         };
 
-    await runJourney(tenant, [step], { phone: context.phone, name: context.name }, opts);
+    await runJourney(
+      tenant,
+      [step],
+      { phone: context.phone, name: context.name, phoneNumberId: context.phoneNumberId },
+      opts
+    );
     if (step.type === "message") messages++;
 
     currentId = outFrom(node.id)[0]?.target;
@@ -221,7 +234,7 @@ export async function runJourneyGraph(
  */
 export async function runJourneyForSegment(
   tenant: Tenant,
-  journey: { id: string; nodes: unknown; edges: unknown; triggerValue: string | null }
+  journey: { id: string; nodes: unknown; edges: unknown; triggerValue: string | null; phoneNumberId?: string }
 ): Promise<{ enrolled: number }> {
   const segmentId = journey.triggerValue;
   if (!segmentId) return { enrolled: 0 };
@@ -245,7 +258,9 @@ export async function runJourneyForSegment(
 
   for (const c of contacts) {
     // Sequential so a big segment doesn't hammer the send path.
-    await runJourneyGraph(tenant, nodes, edges, { phone: c.phone, name: c.name }).catch((e) =>
+    await runJourneyGraph(tenant, nodes, edges, {
+      phone: c.phone, name: c.name, phoneNumberId: journey.phoneNumberId || undefined,
+    }).catch((e) =>
       console.error("[journey] segment run error:", e?.message || e)
     );
   }
@@ -259,16 +274,22 @@ export async function runJourneyForSegment(
 export async function triggerNewContactJourneys(
   tenant: Tenant,
   phone: string,
-  name?: string
+  name?: string,
+  /** The number the first message arrived on. */
+  inboundOn?: string
 ): Promise<void> {
   const journeys = await prisma.journey.findMany({
     where: { tenantId: tenant.id, status: "ACTIVE", triggerType: "new_contact" },
   });
   for (const j of journeys) {
+    // A journey pinned to a number only fires for contacts arriving on it.
+    if (j.phoneNumberId && inboundOn && j.phoneNumberId !== inboundOn) continue;
     const nodes = (j.nodes as unknown as GraphNodeLike[]) || [];
     if (!nodes.length) continue;
     const edges = (j.edges as unknown as GraphEdgeLike[]) || [];
-    runJourneyGraph(tenant, nodes, edges, { phone, name }).catch((e) =>
+    runJourneyGraph(tenant, nodes, edges, {
+      phone, name, phoneNumberId: j.phoneNumberId || inboundOn,
+    }).catch((e) =>
       console.error("[journey] new-contact run error:", e?.message || e)
     );
   }
@@ -282,21 +303,26 @@ export async function tryTriggerJourney(
   tenant: Tenant,
   phone: string,
   name: string | undefined,
-  text: string
+  text: string,
+  /** The number the message arrived on. */
+  inboundOn?: string
 ): Promise<boolean> {
   const journeys = await prisma.journey.findMany({
     where: { tenantId: tenant.id, status: "ACTIVE", triggerType: "keyword" },
   });
   const hay = text.toLowerCase();
   for (const j of journeys) {
+    // "brochure" on the Sales number must not fire Support's journey.
+    if (j.phoneNumberId && inboundOn && j.phoneNumberId !== inboundOn) continue;
     const kw = (j.triggerValue || "").toLowerCase().trim();
     if (kw && hay.includes(kw)) {
       const nodes = (j.nodes as unknown as GraphNodeLike[]) || [];
       const edges = (j.edges as unknown as GraphEdgeLike[]) || [];
+      const ctx = { phone, name, triggerText: text, phoneNumberId: inboundOn || j.phoneNumberId || undefined };
       // fire-and-forget so inbound handling stays fast
       const run = nodes.length
-        ? runJourneyGraph(tenant, nodes, edges, { phone, name, triggerText: text })
-        : runJourney(tenant, (j.steps as unknown as JourneyStep[]) || [], { phone, name });
+        ? runJourneyGraph(tenant, nodes, edges, ctx)
+        : runJourney(tenant, (j.steps as unknown as JourneyStep[]) || [], ctx);
       run.catch((e: Error) => console.error("[journey] run error:", e?.message || e));
       return true;
     }

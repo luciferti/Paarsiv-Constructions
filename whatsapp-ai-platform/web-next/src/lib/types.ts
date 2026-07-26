@@ -188,6 +188,7 @@ export interface Journey {
   status: string;
   triggerType: string;
   triggerValue?: string | null;
+  phoneNumberId?: string;
   steps: JourneyStep[];
   nodes?: unknown[];
   edges?: unknown[];

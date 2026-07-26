@@ -7,7 +7,7 @@ export const quickRepliesRouter = Router();
 quickRepliesRouter.use(requireAuth);
 
 /** GET /quick-replies — canned responses for the tenant (all roles). */
-quickRepliesRouter.get("/", async (req, res) => {
+quickRepliesRouter.get("/", requirePermission("inbox.view"), async (req, res) => {
   const replies = await prisma.quickReply.findMany({
     where: { tenantId: req.auth!.tenantId },
     orderBy: { title: "asc" },

@@ -19,7 +19,7 @@ const rulesSchema = z.object({
 });
 
 /** GET /segments — list saved segments with a live contact count each. */
-segmentsRouter.get("/", async (req, res) => {
+segmentsRouter.get("/", requirePermission("contacts.view"), async (req, res) => {
   const segments = await prisma.segment.findMany({
     where: { tenantId: req.auth!.tenantId },
     orderBy: { createdAt: "desc" },

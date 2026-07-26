@@ -110,3 +110,44 @@ to re-run the live checks and **Repair** if the webhook subscription is lost.
 ./start.sh        # postgres + API :4000 + classic web :5173
 cd web-next && npm run dev -- --port 3100   # premium UI
 ```
+
+## Integrations and the API
+
+### Connectors (data in)
+
+**Settings → Integrations → Connectors.** Each connector is an inbound webhook
+URL with a long secret in the path. Shopify, Salesforce, Zoho CRM and
+ServiceNow payloads are mapped to contacts automatically; anything else uses the
+**Custom** connector and our own JSON shape:
+
+```json
+{ "phone": "919810000001", "name": "Ravi", "email": "ravi@example.com",
+  "tags": ["lead"], "attributes": { "plan": "gold" } }
+```
+
+A contact that already exists is filled in, never overwritten — an agent's
+edits win. A payload with no usable phone number is recorded as a skipped
+event with the reason, not silently dropped. Every connector shows its last 50
+events, and the secret can be rotated (the old URL dies immediately) or the
+whole connector paused.
+
+For a deeper integration than "post JSON at a URL" — two-way sync, OAuth apps,
+a product not in the list — customers are pointed at the support team.
+
+### API (everything out and in)
+
+**Settings → Integrations → API** has the base URL, the auth header, key
+management and ready-to-paste calls for adding contacts, creating segments and
+templates, uploading media, running campaigns and creating users. The full
+reference is at `/api/docs`.
+
+Keys authenticate as `Authorization: Bearer wak_…` and are scoped:
+
+- **No scopes** → full access to that workspace.
+- **Scopes set** → the key may only do exactly those, even though it
+  authenticates as an admin. A key for a website lead form should hold
+  `contacts.edit` and nothing else.
+
+Every read endpoint is permission-checked too, so a scoped key can't wander
+into reports or the inbox. Writes are attributed to the key's name in the audit
+log.

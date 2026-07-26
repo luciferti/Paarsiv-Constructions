@@ -83,7 +83,7 @@ reportsRouter.get("/agents", requirePermission("reports.agents"), async (req, re
  * GET /reports/timeseries — daily buckets for charts: inbound/outbound
  * messages split by sender, new conversations and new contacts.
  */
-reportsRouter.get("/timeseries", async (req, res) => {
+reportsRouter.get("/timeseries", requirePermission("reports.view"), async (req, res) => {
   const tenantId = req.auth!.tenantId;
   const range = parseRange(req);
   const to = range.to ?? new Date();
@@ -134,7 +134,7 @@ reportsRouter.get("/timeseries", async (req, res) => {
 });
 
 /** GET /reports/breakdown — audience distribution for donut/bar charts. */
-reportsRouter.get("/breakdown", async (req, res) => {
+reportsRouter.get("/breakdown", requirePermission("reports.view"), async (req, res) => {
   const tenantId = req.auth!.tenantId;
   const range = dateFilter(parseRange(req));
 
@@ -166,7 +166,7 @@ reportsRouter.get("/breakdown", async (req, res) => {
 });
 
 /** GET /reports/overview — headline metrics + per-campaign performance. */
-reportsRouter.get("/overview", async (req, res) => {
+reportsRouter.get("/overview", requirePermission("reports.view"), async (req, res) => {
   const tenantId = req.auth!.tenantId;
   const range = dateFilter(parseRange(req));
   const msgWhere = range ? { timestamp: range } : {};

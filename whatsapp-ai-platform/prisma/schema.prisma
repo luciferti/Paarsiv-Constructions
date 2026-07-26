@@ -122,6 +122,7 @@ model Tenant {
   phoneNumbers    PhoneNumber[]
   journeys        Journey[]
   apiKeys         ApiKey[]
+  connectors      Connector[]
   auditLogs       AuditLog[]
 }
 
@@ -145,11 +146,51 @@ model ApiKey {
   name       String
   prefix     String    // first chars shown in UI, e.g. wak_a1b2
   keyHash    String    @unique
+  // Permission keys this key is limited to; empty = full tenant access.
+  scopes     String[]  @default([])
   lastUsedAt DateTime?
   revokedAt  DateTime?
   createdAt  DateTime  @default(now())
 
   @@index([tenantId])
+}
+
+// ---------------- Connector (inbound integration: Shopify, Zoho, ...) -------
+// Each connector is an inbound webhook the external system posts to. Payloads
+// are mapped to contacts (and tags), so CRM/e-commerce data flows in without
+// anyone exporting CSVs.
+model Connector {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type          String   // shopify | salesforce | zoho | servicenow | custom
+  name          String
+  secret        String   @unique // rides in the webhook URL
+  active        Boolean  @default(true)
+  // { tag, optInDefault, fieldMap: { phone, name, email, ... } overrides }
+  config        Json?
+  eventsReceived Int     @default(0)
+  contactsUpserted Int   @default(0)
+  lastEventAt   DateTime?
+  lastError     String?
+  createdAt     DateTime @default(now())
+
+  events ConnectorEvent[]
+
+  @@index([tenantId])
+}
+
+model ConnectorEvent {
+  id          String    @id @default(cuid())
+  connectorId String
+  connector   Connector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  status      String    @default("processed") // processed | skipped | error
+  summary     String?   // e.g. "order paid → +919810001234 tagged shopify-customer"
+  error       String?
+  payload     Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([connectorId, createdAt])
 }
 
 // ---------------- AuditLog ----------------
@@ -547,6 +588,8 @@ model Journey {
   status       String   @default("DRAFT") // DRAFT | ACTIVE
   triggerType  String   @default("keyword") // keyword | new_contact
   triggerValue String?  // keyword text when triggerType = keyword
+  // Which of our numbers this journey listens and sends on. "" = every number.
+  phoneNumberId String  @default("")
   steps        Json     @default("[]")   // linear steps derived from the graph (runner)
   nodes        Json     @default("[]")   // visual builder nodes [{id,type,position,data}]
   edges        Json     @default("[]")   // visual builder edges [{id,source,target}]

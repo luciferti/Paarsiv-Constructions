@@ -71,10 +71,17 @@ export const ROLE_DEFAULTS: Record<Role, string[]> = {
 export interface PermissionSubject {
   role: Role;
   permissions?: string[] | null;
+  /**
+   * The list is the whole truth — used by API keys, where a scoped key must
+   * stay scoped even though it authenticates as an admin. People are never
+   * strict, so an admin can't lock themselves out of their own workspace.
+   */
+  strict?: boolean;
 }
 
 /** Effective list: admins get everything, else explicit list, else role defaults. */
 export function effectivePermissions(user: PermissionSubject): string[] {
+  if (user.strict) return user.permissions ?? [];
   if (user.role === "ADMIN") return ALL_PERMISSIONS;
   if (user.permissions && user.permissions.length > 0) return user.permissions;
   return ROLE_DEFAULTS[user.role] ?? [];

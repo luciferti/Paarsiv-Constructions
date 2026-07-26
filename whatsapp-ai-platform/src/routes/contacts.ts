@@ -61,7 +61,7 @@ function queryFilter(req: any) {
 }
 
 /** GET /contacts — list with optional search + segment filter. */
-contactsRouter.get("/", async (req, res) => {
+contactsRouter.get("/", requirePermission("contacts.view"), async (req, res) => {
   const where = await listWhere(req.auth!.tenantId, queryFilter(req));
   const paging = parsePaging(req, 25);
   const [contacts, total] = await Promise.all([
@@ -249,7 +249,7 @@ contactsRouter.patch("/:id", requirePermission("contacts.edit"), async (req, res
  * GET /contacts/:id/360 — the customer-360 aggregate: profile, conversation,
  * real messaging KPIs, campaign history, merged timeline and a health score.
  */
-contactsRouter.get("/:id/360", async (req, res) => {
+contactsRouter.get("/:id/360", requirePermission("contacts.view"), async (req, res) => {
   const tenantId = req.auth!.tenantId;
   const contact = await prisma.contact.findFirst({ where: { id: req.params.id, tenantId } });
   if (!contact) return res.status(404).json({ error: "not found" });

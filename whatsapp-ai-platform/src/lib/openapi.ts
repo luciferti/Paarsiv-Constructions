@@ -102,8 +102,22 @@ export const openapiSpec = {
     },
     "/reports/overview": { get: { summary: "Audience + inbox + campaign-level report", responses: { "200": { description: "overview" } } } },
     "/api-keys": {
-      get: { summary: "List API keys (admin)", responses: { "200": { description: "keys[]" } } },
-      post: { summary: "Create API key — secret returned once (admin)", responses: { "201": { description: "key + secret" } } },
+      get: { summary: "List API keys (admin)", responses: { "200": { description: "keys[] with their scopes" } } },
+      post: { summary: "Create API key — secret returned once. Pass `scopes` to limit it; omit for full tenant access (admin)", responses: { "201": { description: "key + secret" } } },
+    },
+    "/api-keys/scopes": { get: { summary: "Permission catalog a key can be scoped to", responses: { "200": { description: "grouped scopes" } } } },
+    "/connectors": {
+      get: { summary: "Inbound integrations (Shopify, Salesforce, Zoho, ServiceNow, custom)", responses: { "200": { description: "connectors[] with their webhook URLs" } } },
+      post: { summary: "Add a connector — returns the URL to give the external system", responses: { "201": { description: "connector" } } },
+    },
+    "/connectors/{id}/rotate": { post: { summary: "New webhook secret; the old URL stops working", responses: { "200": { description: "connector" } } } },
+    "/connectors/{id}/events": { get: { summary: "Last 50 events with what each one did", responses: { "200": { description: "events[]" } } } },
+    "/hooks/{secret}": {
+      post: {
+        summary: "PUBLIC — where external systems post. The secret in the path is the credential; the payload is mapped to a contact by connector type",
+        security: [],
+        responses: { "200": { description: "acknowledged; processed asynchronously" } },
+      },
     },
     "/logs/audit": { get: { summary: "Audit trail (admin)", responses: { "200": { description: "logs[]" } } } },
     "/logs/webhooks": { get: { summary: "Webhook event log (admin)", responses: { "200": { description: "logs[]" } } } },

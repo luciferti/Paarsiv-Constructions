@@ -94,7 +94,7 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
   // their very first words are "STOP", a welcome journey must not fire.
   const isNewContact = await upsertContact(tenant.id, msg.phone, msg.customerName);
   if (isNewContact && !consentAction) {
-    triggerNewContactJourneys(tenant, msg.phone, msg.customerName).catch(() => {});
+    triggerNewContactJourneys(tenant, msg.phone, msg.customerName, inboundOn).catch(() => {});
   }
 
   const inbound = await prisma.message.create({
@@ -146,7 +146,8 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
     tenant,
     msg.phone,
     msg.customerName,
-    msg.text
+    msg.text,
+    inboundOn
   );
   if (handledByJourney) return;
 

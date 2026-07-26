@@ -35,6 +35,8 @@ const bodySchema = z.object({
   steps: z.array(stepSchema).max(30).optional(),
   nodes: z.array(nodeSchema).max(50).optional(),
   edges: z.array(edgeSchema).max(80).optional(),
+  /** Which of our numbers the journey listens and sends on; "" = every number. */
+  phoneNumberId: z.string().optional(),
 });
 
 /** Graph is the source of truth when present; steps are derived for the runner. */
@@ -61,7 +63,7 @@ function resolveGraph(d: z.infer<typeof bodySchema>) {
 }
 
 /** GET /journeys — list. */
-journeysRouter.get("/", async (req, res) => {
+journeysRouter.get("/", requirePermission("journeys.manage"), async (req, res) => {
   const journeys = await prisma.journey.findMany({
     where: { tenantId: req.auth!.tenantId },
     orderBy: { createdAt: "desc" },
@@ -81,7 +83,13 @@ journeysRouter.post("/", requirePermission("journeys.manage"), async (req, res) 
   if (exists) return res.status(409).json({ error: "journey name taken" });
 
   const journey = await prisma.journey.create({
-    data: { tenantId: req.auth!.tenantId, name: d.name, status: "DRAFT", ...resolveGraph(d) },
+    data: {
+      tenantId: req.auth!.tenantId,
+      name: d.name,
+      status: "DRAFT",
+      phoneNumberId: d.phoneNumberId ?? "",
+      ...resolveGraph(d),
+    },
   });
   res.status(201).json({ journey });
 });
@@ -112,7 +120,11 @@ journeysRouter.patch("/:id", requirePermission("journeys.manage"), async (req, r
   if (!j) return res.status(404).json({ error: "not found" });
   const journey = await prisma.journey.update({
     where: { id: j.id },
-    data: { name: parsed.data.name, ...resolveGraph(parsed.data) },
+    data: {
+      name: parsed.data.name,
+      ...(parsed.data.phoneNumberId !== undefined ? { phoneNumberId: parsed.data.phoneNumberId } : {}),
+      ...resolveGraph(parsed.data),
+    },
   });
   res.json({ journey });
 });

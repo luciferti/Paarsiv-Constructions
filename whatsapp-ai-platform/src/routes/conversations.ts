@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { conversationVisibilityWhere, canAssignTo } from "../lib/visibility";
 import { sendReply } from "../services/inbound";
 import { emitRealtime } from "../lib/events";
@@ -17,7 +17,7 @@ async function loadVisible(reqAuth: any, id: string) {
 }
 
 /** GET /conversations — role-scoped list, newest activity first. */
-conversationsRouter.get("/", async (req, res) => {
+conversationsRouter.get("/", requirePermission("inbox.view"), async (req, res) => {
   const where = await conversationVisibilityWhere(req.auth!);
   const status = typeof req.query.status === "string" ? req.query.status : undefined;
   const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
@@ -63,7 +63,7 @@ conversationsRouter.get("/", async (req, res) => {
  * GET /conversations/numbers — the senders that actually have conversations,
  * so the inbox filter only offers numbers with something behind them.
  */
-conversationsRouter.get("/numbers", async (req, res) => {
+conversationsRouter.get("/numbers", requirePermission("inbox.view"), async (req, res) => {
   const numbers = await prisma.phoneNumber.findMany({
     where: { tenantId: req.auth!.tenantId },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
@@ -85,7 +85,7 @@ conversationsRouter.get("/numbers", async (req, res) => {
 });
 
 /** GET /conversations/:id/messages — thread history + marks read. */
-conversationsRouter.get("/:id/messages", async (req, res) => {
+conversationsRouter.get("/:id/messages", requirePermission("inbox.view"), async (req, res) => {
   const conv = await loadVisible(req.auth!, req.params.id);
   if (!conv) return res.status(404).json({ error: "not found" });
 
@@ -172,7 +172,7 @@ conversationsRouter.patch("/:id/labels", async (req, res) => {
 });
 
 /** GET /conversations/:id/notes — internal notes (never sent to customer). */
-conversationsRouter.get("/:id/notes", async (req, res) => {
+conversationsRouter.get("/:id/notes", requirePermission("inbox.notes"), async (req, res) => {
   const conv = await loadVisible(req.auth!, req.params.id);
   if (!conv) return res.status(404).json({ error: "not found" });
   const notes = await prisma.note.findMany({

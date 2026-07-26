@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
-import type { Journey, Segment, Template } from "@/lib/types";
+import type { InboxNumber, Journey, Segment, Template } from "@/lib/types";
 
 type Kind = "trigger" | "message" | "wait" | "handoff" | "tag" | "condition";
 
@@ -124,6 +124,8 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const [name, setName] = useState("");
+  const [numbers, setNumbers] = useState<InboxNumber[]>([]);
+  const [phoneNumberId, setPhoneNumberId] = useState("");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [loading, setLoading] = useState(!!journeyId);
@@ -141,12 +143,16 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
   useEffect(() => {
     api.get<{ templates: Template[] }>("/templates").then((r) => setTemplates(r.templates)).catch(() => {});
     api.get<{ segments: Segment[] }>("/segments").then((r) => setSegments(r.segments)).catch(() => {});
+    api.get<{ numbers: InboxNumber[] }>("/conversations/numbers")
+      .then((r) => setNumbers(r.numbers.filter((n) => n.active)))
+      .catch(() => {});
     if (!journeyId) return;
     api.get<{ journeys: Journey[] }>("/journeys")
       .then((r) => {
         const j = r.journeys.find((x) => x.id === journeyId);
         if (!j) return;
         setName(j.name);
+        setPhoneNumberId(j.phoneNumberId || "");
         const savedNodes = (j.nodes || []) as unknown as Node<NodeData>[];
         if (savedNodes.length) {
           // Nodes created through the API may have no position — lay them out.
@@ -261,6 +267,7 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
     setSaving(true);
     const payload = {
       name: name.trim(),
+      phoneNumberId,
       nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })),
       edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
     };
@@ -372,6 +379,23 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
 
               {selected.data.kind === "trigger" && (
                 <>
+                  {numbers.length > 1 && (
+                    <div>
+                      <label className="text-xs text-muted-foreground">WhatsApp number</label>
+                      <select className={clsx(input, "mt-1")} value={phoneNumberId}
+                        onChange={(e) => setPhoneNumberId(e.target.value)}>
+                        <option value="">Every number</option>
+                        {numbers.map((n) => (
+                          <option key={n.phoneNumberId} value={n.phoneNumberId}>
+                            {n.label || n.displayPhoneNumber}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-muted-foreground mt-1.5">
+                        The journey only listens on this number, and its messages leave from it.
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <label className="text-xs text-muted-foreground">Entry source</label>
                     <div className="mt-1.5 space-y-1.5">

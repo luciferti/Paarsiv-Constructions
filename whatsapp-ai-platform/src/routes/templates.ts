@@ -58,7 +58,7 @@ async function assetUrlMap(tenantId: string, templates: { headerAssetId: string 
 }
 
 /** GET /templates — list with tokens, Meta status and resolved media URLs. */
-templatesRouter.get("/", async (req, res) => {
+templatesRouter.get("/", requirePermission("templates.view"), async (req, res) => {
   const paging = parsePaging(req, 24);
   const folderId = typeof req.query.folderId === "string" && req.query.folderId ? req.query.folderId : undefined;
   const where = { tenantId: req.auth!.tenantId, ...(folderId ? { folderId } : {}) };

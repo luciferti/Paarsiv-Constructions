@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Copy, GitMerge, KeyRound, PlugZap, ScrollText, ShieldCheck, Webhook } from "lucide-react";
+import { ArrowRight, Code2, GitMerge, Plug, PlugZap, ScrollText, ShieldCheck, Webhook } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import type { ContactField } from "@/lib/types";
@@ -71,7 +71,7 @@ interface WaStatus {
   error?: string | null;
 }
 
-type Tab = "whatsapp" | "keys" | "merge" | "consent" | "audit" | "webhooks";
+type Tab = "whatsapp" | "integrations" | "merge" | "consent" | "audit" | "webhooks";
 
 /** Comma-separated editing for a keyword list — one input, no chip fiddling. */
 function KeywordInput({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder: string }) {
@@ -136,7 +136,7 @@ export default function SettingsPage() {
 
   const TABS: { v: Tab; label: string; icon: React.ElementType }[] = [
     { v: "whatsapp", label: "WhatsApp", icon: PlugZap },
-    { v: "keys", label: "API keys", icon: KeyRound },
+    { v: "integrations", label: "Integrations", icon: Plug },
     { v: "merge", label: "Merge rules", icon: GitMerge },
     { v: "consent", label: "Opt-out rules", icon: ShieldCheck },
     { v: "audit", label: "Audit log", icon: ScrollText },
@@ -203,55 +203,37 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {tab === "keys" && (
-          <div className="space-y-4">
-            {freshSecret && (
-              <div className="rounded-xl border-2 border-primary bg-accent p-4">
-                <p className="text-sm font-semibold text-accent-foreground">Copy this key now — it will not be shown again.</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <code className="flex-1 text-xs bg-background border rounded-lg px-3 py-2 break-all">{freshSecret}</code>
-                  <button className={btnGhost} onClick={() => { navigator.clipboard?.writeText(freshSecret); }}>
-                    <Copy className="w-3 h-3 inline mr-1" />Copy
-                  </button>
-                  <button className={btnPri} onClick={() => setFreshSecret(null)}>Done</button>
-                </div>
-              </div>
-            )}
-            <div className="flex gap-2">
-              <input className={clsx(inputCls, "w-64")} placeholder="Key name, e.g. Zapier" value={keyName} onChange={(e) => setKeyName(e.target.value)} />
-              <button className={btnPri} disabled={!keyName.trim()} onClick={createKey}>+ Create key</button>
-            </div>
-            <div className="rounded-xl border bg-card shadow-card overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-[11px] text-muted-foreground uppercase tracking-wide border-b bg-muted/40">
-                    <th className="px-5 py-3 font-medium">Name</th>
-                    <th className="px-3 py-3 font-medium">Key</th>
-                    <th className="px-3 py-3 font-medium">Last used</th>
-                    <th className="px-3 py-3 font-medium">Status</th>
-                    <th className="px-3 py-3" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {keys.map((k) => (
-                    <tr key={k.id} className="border-b last:border-0">
-                      <td className="px-5 py-3 font-medium">{k.name}</td>
-                      <td className="px-3 py-3"><code className="text-xs">{k.prefix}…</code></td>
-                      <td className="px-3 py-3 text-muted-foreground">{k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : "never"}</td>
-                      <td className="px-3 py-3">
-                        <span className={clsx("text-[11px] px-2 py-0.5 rounded-full font-medium", k.revokedAt ? "bg-destructive/15 text-destructive" : "bg-accent text-accent-foreground")}>
-                          {k.revokedAt ? "revoked" : "active"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        {!k.revokedAt && <button className={btnGhost} onClick={() => api.del(`/api-keys/${k.id}`).then(load)}>Revoke</button>}
-                      </td>
-                    </tr>
-                  ))}
-                  {keys.length === 0 && <tr><td colSpan={5} className="px-5 py-5 text-muted-foreground">No API keys yet.</td></tr>}
-                </tbody>
-              </table>
-            </div>
+        {tab === "integrations" && (
+          <div className="max-w-2xl space-y-3">
+            {[
+              {
+                to: "/settings/connectors", icon: Plug, title: "Connectors",
+                desc: "Shopify, Salesforce, Zoho, ServiceNow or your own system — contacts flow in automatically.",
+              },
+              {
+                to: "/settings/api", icon: Code2, title: "API",
+                desc: "Keys with scopes, plus ready-made calls for contacts, segments, templates, media, campaigns and users.",
+              },
+            ].map((card) => {
+              const Icon = card.icon;
+              return (
+                <button key={card.to} onClick={() => router.push(card.to)}
+                  className="w-full text-left rounded-xl border bg-card shadow-card p-6 hover:border-primary/50 transition-colors group">
+                  <div className="flex items-start gap-4">
+                    <div className="w-11 h-11 rounded-xl grid place-items-center shrink-0 bg-accent text-accent-foreground">
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-[15px] font-semibold">{card.title}</h2>
+                        <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">{card.desc}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
 
