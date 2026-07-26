@@ -79,6 +79,92 @@ reportsRouter.get("/agents", async (req, res) => {
   });
 });
 
+/**
+ * GET /reports/timeseries — daily buckets for charts: inbound/outbound
+ * messages split by sender, new conversations and new contacts.
+ */
+reportsRouter.get("/timeseries", async (req, res) => {
+  const tenantId = req.auth!.tenantId;
+  const range = parseRange(req);
+  const to = range.to ?? new Date();
+  const from = range.from ?? new Date(to.getTime() - 29 * 86_400_000);
+
+  const dayKey = (d: Date) => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+
+  const [messages, conversations, contacts] = await Promise.all([
+    prisma.message.findMany({
+      where: { tenantId, timestamp: { gte: from, lte: to } },
+      select: { timestamp: true, direction: true, sentBy: true },
+      take: 20000,
+    }),
+    prisma.conversation.findMany({
+      where: { tenantId, createdAt: { gte: from, lte: to } },
+      select: { createdAt: true },
+      take: 20000,
+    }),
+    prisma.contact.findMany({
+      where: { tenantId, createdAt: { gte: from, lte: to } },
+      select: { createdAt: true },
+      take: 20000,
+    }),
+  ]);
+
+  // Pre-seed every day in the window so charts have no gaps.
+  const buckets = new Map<string, { date: string; incoming: number; ai: number; agent: number; conversations: number; contacts: number }>();
+  for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+    const k = dayKey(d);
+    buckets.set(k, { date: k, incoming: 0, ai: 0, agent: 0, conversations: 0, contacts: 0 });
+  }
+  const bump = (k: string, field: "incoming" | "ai" | "agent" | "conversations" | "contacts") => {
+    const b = buckets.get(k);
+    if (b) b[field] += 1;
+  };
+  for (const m of messages) {
+    const k = dayKey(m.timestamp);
+    if (m.direction === "INBOUND") bump(k, "incoming");
+    else bump(k, m.sentBy === "AGENT" ? "agent" : "ai");
+  }
+  for (const c of conversations) bump(dayKey(c.createdAt), "conversations");
+  for (const c of contacts) bump(dayKey(c.createdAt), "contacts");
+
+  res.json({ series: Array.from(buckets.values()) });
+});
+
+/** GET /reports/breakdown — audience distribution for donut/bar charts. */
+reportsRouter.get("/breakdown", async (req, res) => {
+  const tenantId = req.auth!.tenantId;
+  const range = dateFilter(parseRange(req));
+
+  const contacts = await prisma.contact.findMany({
+    where: { tenantId, ...(range ? { createdAt: range } : {}) },
+    select: { city: true, tags: true, source: true, optedIn: true },
+    take: 5000,
+  });
+
+  const tally = (pick: (c: (typeof contacts)[number]) => string[]) => {
+    const map = new Map<string, number>();
+    for (const c of contacts) for (const v of pick(c)) map.set(v, (map.get(v) || 0) + 1);
+    return Array.from(map.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+  };
+
+  res.json({
+    cities: tally((c) => (c.city ? [c.city] : ["Unknown"])),
+    tags: tally((c) => (c.tags.length ? c.tags : [])),
+    sources: tally((c) => [c.source || "manual"]),
+    optIn: [
+      { name: "Opted in", value: contacts.filter((c) => c.optedIn).length },
+      { name: "Opted out", value: contacts.filter((c) => !c.optedIn).length },
+    ],
+    total: contacts.length,
+  });
+});
+
 /** GET /reports/overview — headline metrics + per-campaign performance. */
 reportsRouter.get("/overview", async (req, res) => {
   const tenantId = req.auth!.tenantId;
