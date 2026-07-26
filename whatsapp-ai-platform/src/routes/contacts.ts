@@ -136,6 +136,174 @@ contactsRouter.post("/import", requireRole("ADMIN", "RM"), async (req, res) => {
   res.json({ imported: created });
 });
 
+const patchSchema = z.object({
+  name: z.string().optional(),
+  email: z.string().optional(),
+  city: z.string().optional(),
+  company: z.string().optional(),
+  jobTitle: z.string().optional(),
+  country: z.string().optional(),
+  timezone: z.string().optional(),
+  language: z.string().optional(),
+  externalId: z.string().optional(),
+  status: z.enum(["active", "blocked", "archived"]).optional(),
+  ownerId: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  optedIn: z.boolean().optional(),
+  attributes: z.record(z.string(), z.any()).optional(),
+});
+
+/** PATCH /contacts/:id — update profile fields (admin/RM). */
+contactsRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+  const parsed = patchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const c = await prisma.contact.findFirst({
+    where: { id: req.params.id, tenantId: req.auth!.tenantId },
+  });
+  if (!c) return res.status(404).json({ error: "not found" });
+  const contact = await prisma.contact.update({ where: { id: c.id }, data: parsed.data });
+  audit(req, "contact.update", { entity: "contact", entityId: c.id, meta: { fields: Object.keys(parsed.data) } });
+  res.json({ contact });
+});
+
+/**
+ * GET /contacts/:id/360 — the customer-360 aggregate: profile, conversation,
+ * real messaging KPIs, campaign history, merged timeline and a health score.
+ */
+contactsRouter.get("/:id/360", async (req, res) => {
+  const tenantId = req.auth!.tenantId;
+  const contact = await prisma.contact.findFirst({ where: { id: req.params.id, tenantId } });
+  if (!contact) return res.status(404).json({ error: "not found" });
+
+  const conversation = await prisma.conversation.findUnique({
+    where: { tenantId_phone: { tenantId, phone: contact.phone } },
+    include: { assignedUser: { select: { id: true, displayName: true } } },
+  });
+
+  // ---- messaging KPIs (real, from this contact's thread) ----
+  const msgs = conversation
+    ? await prisma.message.findMany({
+        where: { conversationId: conversation.id },
+        orderBy: { timestamp: "asc" },
+      })
+    : [];
+  const inbound = msgs.filter((m) => m.direction === "INBOUND");
+  const outbound = msgs.filter((m) => m.direction === "OUTBOUND");
+  const delivered = outbound.filter((m) => ["DELIVERED", "READ"].includes(m.status)).length;
+  const readCount = outbound.filter((m) => m.status === "READ").length;
+  const failed = outbound.filter((m) => m.status === "FAILED").length;
+  const media = msgs.filter((m) => m.type !== "text").length;
+  const aiReplies = outbound.filter((m) => m.sentBy === "AI").length;
+  const agentReplies = outbound.filter((m) => m.sentBy === "AGENT").length;
+
+  let avgResponseSec: number | null = null;
+  {
+    // avg gap: each inbound → next outbound
+    let total = 0, n = 0;
+    for (const im of inbound) {
+      const next = outbound.find((o) => o.timestamp >= im.timestamp);
+      if (next) { total += next.timestamp.getTime() - im.timestamp.getTime(); n++; }
+    }
+    if (n > 0) avgResponseSec = Math.round(total / n / 1000);
+  }
+
+  const kpis = {
+    totalMessages: msgs.length,
+    incoming: inbound.length,
+    outgoing: outbound.length,
+    delivered,
+    read: readCount,
+    failed,
+    mediaSent: media,
+    aiReplies,
+    agentReplies,
+    deliveryRate: outbound.length ? Math.round((delivered / outbound.length) * 100) : 0,
+    readRate: outbound.length ? Math.round((readCount / outbound.length) * 100) : 0,
+    replyRate: outbound.length ? Math.round(Math.min(1, inbound.length / outbound.length) * 100) : 0,
+    avgResponseSec,
+    firstContactAt: msgs[0]?.timestamp ?? null,
+    lastContactAt: msgs[msgs.length - 1]?.timestamp ?? null,
+  };
+
+  // ---- campaign history ----
+  const recipients = await prisma.campaignRecipient.findMany({
+    where: { phone: contact.phone, campaign: { tenantId } },
+    include: { campaign: { include: { template: { select: { name: true } } } } },
+    orderBy: { sentAt: "desc" },
+    take: 25,
+  });
+  const campaignHistory = recipients.map((r) => ({
+    id: r.id,
+    campaignName: r.campaign.name,
+    templateName: r.campaign.template?.name ?? null,
+    status: r.status,
+    sentAt: r.sentAt,
+    error: r.error,
+  }));
+
+  // ---- notes ----
+  const notes = conversation
+    ? await prisma.note.findMany({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      })
+    : [];
+
+  // ---- merged timeline (messages + notes + campaigns), newest first ----
+  type TimelineEvent = { type: string; at: Date; title: string; detail?: string };
+  const events: TimelineEvent[] = [];
+  for (const m of msgs.slice(-25)) {
+    events.push({
+      type: m.direction === "INBOUND" ? "message_in" : m.sentBy === "AI" ? "message_ai" : "message_agent",
+      at: m.timestamp,
+      title: m.direction === "INBOUND" ? "Customer message" : m.sentBy === "AI" ? "AI reply" : "Agent reply",
+      detail: m.body.slice(0, 120),
+    });
+  }
+  for (const n of notes) {
+    events.push({ type: "note", at: n.createdAt, title: `Note by ${n.authorName || "agent"}`, detail: n.body.slice(0, 120) });
+  }
+  for (const r of recipients) {
+    if (r.sentAt) events.push({ type: "campaign", at: r.sentAt, title: `Campaign: ${r.campaign.name}`, detail: `${r.status.toLowerCase()}${r.campaign.template?.name ? ` · ${r.campaign.template.name}` : ""}` });
+  }
+  events.sort((a, b) => b.at.getTime() - a.at.getTime());
+
+  // ---- health score (0-100, from real signals) ----
+  const inactiveDays = kpis.lastContactAt
+    ? Math.floor((Date.now() - new Date(kpis.lastContactAt).getTime()) / 86_400_000)
+    : 999;
+  const campaignReads = recipients.filter((r) => r.status === "READ").length;
+  const campaignEngagement = recipients.length ? campaignReads / recipients.length : 0;
+  let health = 30;
+  health += (kpis.readRate / 100) * 20;
+  health += (kpis.replyRate / 100) * 25;
+  health += campaignEngagement * 15;
+  health += inactiveDays <= 2 ? 10 : inactiveDays <= 7 ? 5 : inactiveDays <= 30 ? 0 : -15;
+  if (contact.status === "blocked") health = Math.min(health, 10);
+  const healthScore = Math.max(0, Math.min(100, Math.round(health)));
+
+  const fields = await prisma.contactField.findMany({ where: { tenantId }, orderBy: { createdAt: "asc" } });
+  const owner = contact.ownerId
+    ? await prisma.user.findFirst({ where: { id: contact.ownerId, tenantId }, select: { id: true, displayName: true } })
+    : null;
+
+  res.json({
+    contact,
+    owner,
+    conversation: conversation
+      ? { id: conversation.id, mode: conversation.mode, labels: conversation.labels, assignedUser: conversation.assignedUser, unreadCount: conversation.unreadCount }
+      : null,
+    kpis,
+    campaignHistory,
+    notes,
+    timeline: events.slice(0, 40),
+    healthScore,
+    inactiveDays: inactiveDays === 999 ? null : inactiveDays,
+    fields,
+  });
+});
+
 /** DELETE /contacts/:id (admin/RM). */
 contactsRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
   const c = await prisma.contact.findFirst({

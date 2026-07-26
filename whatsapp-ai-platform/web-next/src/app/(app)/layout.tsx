@@ -20,7 +20,7 @@ const NAV = [
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/journeys", label: "Journeys", icon: GitBranch },
   { href: "/reports", label: "Reports", icon: BarChart3 },
-  { href: "/team", label: "Team", icon: UsersRound, roles: ["ADMIN", "RM"] },
+  { href: "/team", label: "Users", icon: UsersRound, roles: ["ADMIN", "RM"] },
   { href: "/ai", label: "AI Control", icon: Bot, roles: ["ADMIN"] },
   { href: "/settings", label: "Settings", icon: Settings, roles: ["ADMIN"] },
 ];

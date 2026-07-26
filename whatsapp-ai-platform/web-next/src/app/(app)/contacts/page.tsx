@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Users, Folder as FolderIcon, FolderPlus, Plus, Filter, ChevronDown, ChevronRight,
   X, Search, Upload, Download, Trash2, SlidersHorizontal, Pencil,
@@ -73,6 +74,7 @@ const btnGhost = "h-8 px-3 rounded-lg border text-xs font-medium hover:bg-muted"
 type DrawerKind = null | "segment" | "fields" | "add";
 
 export default function ContactsPage() {
+  const router = useRouter();
   const session = typeof window !== "undefined" ? getSession() : null;
   const canEdit = session?.user.role === "ADMIN" || session?.user.role === "RM";
 
@@ -392,7 +394,12 @@ export default function ContactsPage() {
                     <td className="pl-4 pr-2 py-2.5">
                       <input type="checkbox" checked={selected.has(c.id)} onChange={() => setSelected((p) => { const n = new Set(p); if (n.has(c.id)) { n.delete(c.id); } else { n.add(c.id); } return n; })} />
                     </td>
-                    <td className="px-3 py-2.5 font-medium">{c.name || "—"}</td>
+                    <td
+                      className="px-3 py-2.5 font-medium text-primary hover:underline cursor-pointer"
+                      onClick={() => router.push(`/contacts/${c.id}`)}
+                    >
+                      {c.name || `+${c.phone}`}
+                    </td>
                     <td className="px-3 py-2.5 text-muted-foreground">+{c.phone}</td>
                     <td className="px-3 py-2.5">{c.city || "—"}</td>
                     <td className="px-3 py-2.5">

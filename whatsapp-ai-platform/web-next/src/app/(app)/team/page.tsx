@@ -23,8 +23,8 @@ export default function TeamPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="px-8 py-6 border-b bg-card/50">
-        <h1 className="text-xl font-semibold">Team</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Agents in this workspace — role, team and presence</p>
+        <h1 className="text-xl font-semibold">Users</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">People in this workspace — role, team and presence</p>
       </div>
 
       <div className="p-8 max-w-4xl">

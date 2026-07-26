@@ -265,6 +265,15 @@ model Contact {
   name       String?
   email      String?
   city       String?
+  // Customer-360 profile
+  company    String?
+  jobTitle   String?
+  country    String?
+  timezone   String?
+  language   String?
+  externalId String?  // external CRM id
+  status     String   @default("active") // active | blocked | archived
+  ownerId    String?  // lead owner (User id)
   tags       String[] @default([])
   attributes Json?    // free-form custom fields
   optedIn    Boolean  @default(true) // WhatsApp marketing opt-in
@@ -274,6 +283,7 @@ model Contact {
 
   @@unique([tenantId, phone])
   @@index([tenantId, city])
+  @@index([tenantId, status])
 }
 
 // ---------------- ContactField (tenant-defined custom field) ----------------
