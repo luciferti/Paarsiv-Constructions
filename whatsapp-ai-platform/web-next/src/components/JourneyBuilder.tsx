@@ -9,7 +9,7 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import {
-  ArrowLeft, Loader2, MessageSquare, Tag as TagIcon, Timer, Trash2, UserCheck, Zap,
+  ArrowLeft, Loader2, MessageSquare, Plus, Tag as TagIcon, Timer, Trash2, UserCheck, Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
@@ -140,20 +140,44 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
     [setEdges]
   );
 
+  /**
+   * Add a block. When added by click (no position) it is placed under the last
+   * node and auto-connected, so a flow can be built without drawing edges.
+   */
   function addNode(kind: Kind, at?: { x: number; y: number }) {
     const id = `${kind}-${Date.now()}`;
-    const position = at || { x: 240, y: 160 + nodes.length * 120 };
     const data: NodeData =
       kind === "wait" ? { kind, hours: 24 }
       : kind === "trigger" ? { kind, triggerType: "keyword", triggerValue: "" }
       : { kind };
+
+    // The node with no outgoing edge is the tail of the current flow.
+    const tail = nodes.find((n) => !edges.some((e) => e.source === n.id));
+    const position = at || {
+      x: tail?.position.x ?? 240,
+      y: (tail?.position.y ?? 40) + 130,
+    };
+
     setNodes((ns) => [...ns, { id, type: "flowNode", position, data }]);
+    if (!at && tail && kind !== "trigger") {
+      setEdges((es) => [
+        ...es,
+        { id: `e-${tail.id}-${id}`, source: tail.id, target: id, markerEnd: { type: MarkerType.ArrowClosed }, style: { strokeWidth: 2 } },
+      ]);
+    }
     setSelectedId(id);
   }
 
+  // Fallback for browsers where dataTransfer custom types are unreliable.
+  const draggingKind = useRef<Kind | null>(null);
+
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
-    const kind = e.dataTransfer.getData("application/journey-node") as Kind;
+    const kind =
+      (e.dataTransfer.getData("application/journey-node") as Kind) ||
+      (e.dataTransfer.getData("text/plain") as Kind) ||
+      draggingKind.current;
+    draggingKind.current = null;
     if (!kind) return;
     const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
     addNode(kind, position);
@@ -205,7 +229,7 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
           className="h-9 px-3 rounded-lg border bg-background text-sm font-medium w-64 outline-none focus:ring-2 focus:ring-ring"
           value={name} placeholder="Journey name" onChange={(e) => setName(e.target.value)}
         />
-        <span className="text-xs text-muted-foreground">Drag blocks onto the canvas, then connect them</span>
+        <span className="text-xs text-muted-foreground">Click a block to add it, or drag it onto the canvas</span>
         <div className="flex-1" />
         {err && <span className="text-xs text-destructive mr-2">{err}</span>}
         <button className={btnGhost} onClick={() => router.push("/journeys")}>Cancel</button>
@@ -223,28 +247,36 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
             {PALETTE.map((p) => {
               const Icon = p.icon;
               return (
-                <div
+                <button
                   key={p.kind}
                   draggable
-                  onDragStart={(e) => { e.dataTransfer.setData("application/journey-node", p.kind); e.dataTransfer.effectAllowed = "move"; }}
-                  onDoubleClick={() => addNode(p.kind)}
-                  className="rounded-xl border bg-background p-2.5 cursor-grab active:cursor-grabbing hover:border-primary transition-colors"
+                  onDragStart={(e) => {
+                    draggingKind.current = p.kind;
+                    e.dataTransfer.setData("application/journey-node", p.kind);
+                    e.dataTransfer.setData("text/plain", p.kind);
+                    e.dataTransfer.effectAllowed = "copyMove";
+                  }}
+                  onDragEnd={() => { draggingKind.current = null; }}
+                  onClick={() => addNode(p.kind)}
+                  title={`Click to add · or drag onto the canvas`}
+                  className="w-full text-left rounded-xl border bg-background p-2.5 cursor-grab active:cursor-grabbing hover:border-primary hover:bg-accent/40 transition-colors group/block"
                 >
                   <div className="flex items-center gap-2">
                     <span className={clsx("w-7 h-7 rounded-lg grid place-items-center bg-muted", p.color)}>
                       <Icon className="w-3.5 h-3.5" />
                     </span>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-medium leading-tight">{p.label}</div>
                       <div className="text-[10px] text-muted-foreground truncate">{p.desc}</div>
                     </div>
+                    <Plus className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover/block:opacity-100 shrink-0" />
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
           <p className="text-[10px] text-muted-foreground mt-3 px-1 leading-relaxed">
-            Drag a block onto the canvas (or double-click it). Drag from a node&apos;s bottom dot to another node&apos;s top dot to connect them.
+            <b className="text-foreground">Click a block</b> to add it below the flow (auto-connected), or drag it anywhere on the canvas. To link nodes yourself, drag from a node&apos;s bottom dot to another node&apos;s top dot.
           </p>
         </aside>
 
