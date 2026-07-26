@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { extractTokens } from "../lib/tokens";
 import { deleteOnMeta, submitToMeta, syncFromMeta } from "../services/metaTemplates";
 import { pageMeta, parsePaging } from "../lib/pagination";
@@ -80,7 +80,7 @@ templatesRouter.get("/", async (req, res) => {
 });
 
 /** POST /templates/sync — pull live statuses from Meta (admin/RM). */
-templatesRouter.post("/sync", requireRole("ADMIN", "RM"), async (req, res) => {
+templatesRouter.post("/sync", requirePermission("templates.manage"), async (req, res) => {
   const tenant = await prisma.tenant.findUnique({ where: { id: req.auth!.tenantId } });
   if (!tenant) return res.status(404).json({ error: "tenant missing" });
   const result = await syncFromMeta(tenant);
@@ -109,7 +109,7 @@ function toData(d: z.infer<typeof templateSchema>) {
  * Without WhatsApp credentials the template stays local (status LOCAL) so the
  * platform is still usable before a number is connected.
  */
-templatesRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+templatesRouter.post("/", requirePermission("templates.manage"), async (req, res) => {
   const parsed = templateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const exists = await prisma.template.findFirst({
@@ -150,7 +150,7 @@ templatesRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** PATCH /templates/:id — edit (admin/RM). */
-templatesRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+templatesRouter.patch("/:id", requirePermission("templates.manage"), async (req, res) => {
   const t = await prisma.template.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });
@@ -180,7 +180,7 @@ templatesRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** DELETE /templates/:id (admin/RM). */
-templatesRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+templatesRouter.delete("/:id", requirePermission("templates.manage"), async (req, res) => {
   const t = await prisma.template.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

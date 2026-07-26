@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 
 export const logsRouter = Router();
-logsRouter.use(requireAuth, requireRole("ADMIN"));
+logsRouter.use(requireAuth, requirePermission("logs.view"));
 
 /** GET /logs/audit — recent audit trail (paginated). */
 logsRouter.get("/audit", async (req, res) => {

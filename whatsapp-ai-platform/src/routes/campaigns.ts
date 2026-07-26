@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { runCampaign } from "../services/campaigns";
 import { audit } from "../lib/audit";
@@ -71,7 +71,7 @@ const createSchema = z.object({
 });
 
 /** POST /campaigns — create a draft or scheduled campaign (admin/RM). */
-campaignsRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+campaignsRouter.post("/", requirePermission("campaigns.create"), async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const d = parsed.data;
@@ -97,7 +97,7 @@ campaignsRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** POST /campaigns/:id/send — start sending (admin/RM). */
-campaignsRouter.post("/:id/send", requireRole("ADMIN", "RM"), async (req, res) => {
+campaignsRouter.post("/:id/send", requirePermission("campaigns.send"), async (req, res) => {
   const campaign = await prisma.campaign.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });
@@ -116,7 +116,7 @@ campaignsRouter.post("/:id/send", requireRole("ADMIN", "RM"), async (req, res) =
 });
 
 /** DELETE /campaigns/:id (admin/RM). */
-campaignsRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+campaignsRouter.delete("/:id", requirePermission("campaigns.create"), async (req, res) => {
   const c = await prisma.campaign.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

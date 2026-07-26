@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 
 export const assetFoldersRouter = Router();
 assetFoldersRouter.use(requireAuth);
@@ -14,7 +14,7 @@ assetFoldersRouter.get("/", async (req, res) => {
   res.json({ folders });
 });
 
-assetFoldersRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+assetFoldersRouter.post("/", requirePermission("media.manage"), async (req, res) => {
   const name = z.string().min(1).safeParse(req.body?.name);
   if (!name.success) return res.status(400).json({ error: "name required" });
   const exists = await prisma.assetFolder.findFirst({
@@ -27,7 +27,7 @@ assetFoldersRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
   res.status(201).json({ folder });
 });
 
-assetFoldersRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+assetFoldersRouter.delete("/:id", requirePermission("media.manage"), async (req, res) => {
   const f = await prisma.assetFolder.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

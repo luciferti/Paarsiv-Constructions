@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { pageMeta, parsePaging } from "../lib/pagination";
 
 export const UPLOAD_DIR = path.join(process.cwd(), "uploads");
@@ -38,7 +38,7 @@ assetsRouter.get("/", async (req, res) => {
 });
 
 /** POST /assets — multipart upload (field: "file", optional folderId). admin/RM. */
-assetsRouter.post("/", requireRole("ADMIN", "RM"), upload.single("file"), async (req, res) => {
+assetsRouter.post("/", requirePermission("media.manage"), upload.single("file"), async (req, res) => {
   const f = req.file;
   if (!f) return res.status(400).json({ error: "file required" });
   const folderId = typeof req.body?.folderId === "string" && req.body.folderId ? req.body.folderId : null;
@@ -57,7 +57,7 @@ assetsRouter.post("/", requireRole("ADMIN", "RM"), upload.single("file"), async 
 });
 
 /** PATCH /assets/:id — move to a folder (admin/RM). */
-assetsRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+assetsRouter.patch("/:id", requirePermission("media.manage"), async (req, res) => {
   const a = await prisma.asset.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });
@@ -70,7 +70,7 @@ assetsRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** DELETE /assets/:id (admin/RM) — removes DB row + file. */
-assetsRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+assetsRouter.delete("/:id", requirePermission("media.manage"), async (req, res) => {
   const a = await prisma.asset.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

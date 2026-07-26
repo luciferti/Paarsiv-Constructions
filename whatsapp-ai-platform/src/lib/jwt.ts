@@ -7,6 +7,8 @@ export interface AuthPayload {
   tenantId: string;
   role: Role;
   username: string;
+  /** Explicit grants; empty/absent means the role defaults apply. */
+  permissions?: string[];
 }
 
 export function signToken(payload: AuthPayload): string {

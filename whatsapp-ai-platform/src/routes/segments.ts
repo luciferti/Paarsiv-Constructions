@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { segmentWhere, type SegmentRules } from "../lib/segment";
 
 export const segmentsRouter = Router();
@@ -48,7 +48,7 @@ segmentsRouter.post("/preview", async (req, res) => {
 });
 
 /** POST /segments — save a segment (admin/RM). */
-segmentsRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+segmentsRouter.post("/", requirePermission("segments.manage"), async (req, res) => {
   const nameOk = z.string().min(1).safeParse(req.body?.name);
   const rulesOk = rulesSchema.safeParse(req.body?.rules);
   const folderId = typeof req.body?.folderId === "string" ? req.body.folderId : null;
@@ -75,7 +75,7 @@ segmentsRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** PATCH /segments/:id — update name/rules/folder (admin/RM). */
-segmentsRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+segmentsRouter.patch("/:id", requirePermission("segments.manage"), async (req, res) => {
   const s = await prisma.segment.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });
@@ -100,7 +100,7 @@ segmentsRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** DELETE /segments/:id (admin/RM). */
-segmentsRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+segmentsRouter.delete("/:id", requirePermission("segments.manage"), async (req, res) => {
   const s = await prisma.segment.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

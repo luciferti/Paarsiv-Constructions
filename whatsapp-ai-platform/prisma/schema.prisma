@@ -163,6 +163,8 @@ model User {
   reports      User[]   @relation("Manages")
   team         String?
   presence     String   @default("offline")
+  // Explicit permission list; empty means "use the role defaults".
+  permissions  String[] @default([])
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
 

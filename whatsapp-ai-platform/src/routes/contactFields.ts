@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 
 export const contactFieldsRouter = Router();
 contactFieldsRouter.use(requireAuth);
@@ -30,7 +30,7 @@ const schema = z.object({
 });
 
 /** POST /contact-fields — define a new custom field (admin/RM). */
-contactFieldsRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+contactFieldsRouter.post("/", requirePermission("fields.manage"), async (req, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const key = toKey(parsed.data.label);
@@ -53,7 +53,7 @@ contactFieldsRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** DELETE /contact-fields/:id (admin/RM). Leaves existing attribute values intact. */
-contactFieldsRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+contactFieldsRouter.delete("/:id", requirePermission("fields.manage"), async (req, res) => {
   const f = await prisma.contactField.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

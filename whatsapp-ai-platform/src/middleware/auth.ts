@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { verifyToken, type AuthPayload } from "../lib/jwt";
 import { prisma } from "../lib/prisma";
 import type { Role } from "@prisma/client";
+import { can } from "../lib/permissions";
 
 // Augment Express Request with the authenticated user
 declare global {
@@ -50,6 +51,20 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   } catch {
     return res.status(401).json({ error: "invalid token" });
   }
+}
+
+/**
+ * Permission gate. Roles supply defaults (see lib/permissions), so existing
+ * behaviour is unchanged unless a user has an explicit permission list.
+ */
+export function requirePermission(permission: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.auth) return res.status(401).json({ error: "unauthenticated" });
+    if (!can({ role: req.auth.role, permissions: req.auth.permissions }, permission)) {
+      return res.status(403).json({ error: `missing permission: ${permission}` });
+    }
+    next();
+  };
 }
 
 export function requireRole(...roles: Role[]) {

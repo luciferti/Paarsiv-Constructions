@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 
 export const templateFoldersRouter = Router();
 templateFoldersRouter.use(requireAuth);
@@ -14,7 +14,7 @@ templateFoldersRouter.get("/", async (req, res) => {
   res.json({ folders });
 });
 
-templateFoldersRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+templateFoldersRouter.post("/", requirePermission("templates.manage"), async (req, res) => {
   const name = z.string().min(1).safeParse(req.body?.name);
   if (!name.success) return res.status(400).json({ error: "name required" });
   const exists = await prisma.templateFolder.findFirst({
@@ -27,7 +27,7 @@ templateFoldersRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => 
   res.status(201).json({ folder });
 });
 
-templateFoldersRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+templateFoldersRouter.delete("/:id", requirePermission("templates.manage"), async (req, res) => {
   const f = await prisma.templateFolder.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { parseRange, dateFilter } from "../lib/dateRange";
 
 export const reportsRouter = Router();
@@ -11,7 +11,7 @@ reportsRouter.use(requireAuth);
  * First response = gap between a conversation's first customer message and
  * the first outbound (AI or agent) that follows it.
  */
-reportsRouter.get("/agents", async (req, res) => {
+reportsRouter.get("/agents", requirePermission("reports.agents"), async (req, res) => {
   const tenantId = req.auth!.tenantId;
   const range = dateFilter(parseRange(req));
 

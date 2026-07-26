@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { audit } from "../lib/audit";
 
 export const settingsRouter = Router();
@@ -79,7 +79,7 @@ const updateSchema = z.object({
 });
 
 /** PATCH /settings — admin-only config update (AI Control Panel). */
-settingsRouter.patch("/", requireRole("ADMIN"), async (req, res) => {
+settingsRouter.patch("/", requirePermission("settings.manage"), async (req, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });

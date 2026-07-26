@@ -2,11 +2,11 @@ import { Router } from "express";
 import crypto from "crypto";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { audit } from "../lib/audit";
 
 export const apiKeysRouter = Router();
-apiKeysRouter.use(requireAuth, requireRole("ADMIN"));
+apiKeysRouter.use(requireAuth, requirePermission("settings.manage"));
 
 const sha256 = (t: string) => crypto.createHash("sha256").update(t).digest("hex");
 

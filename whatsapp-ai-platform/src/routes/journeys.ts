@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { runJourney, runJourneyGraph, runJourneyForSegment, type JourneyStep } from "../services/journeys";
 import { graphToSteps, triggerOf, type GraphEdge, type GraphNode } from "../lib/journeyGraph";
 
@@ -70,7 +70,7 @@ journeysRouter.get("/", async (req, res) => {
 });
 
 /** POST /journeys — create (admin/RM). */
-journeysRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+journeysRouter.post("/", requirePermission("journeys.manage"), async (req, res) => {
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const d = parsed.data;
@@ -87,7 +87,7 @@ journeysRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** POST /journeys/:id/run — enroll a segment into the journey (admin/RM). */
-journeysRouter.post("/:id/run", requireRole("ADMIN", "RM"), async (req, res) => {
+journeysRouter.post("/:id/run", requirePermission("journeys.manage"), async (req, res) => {
   const j = await prisma.journey.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });
@@ -103,7 +103,7 @@ journeysRouter.post("/:id/run", requireRole("ADMIN", "RM"), async (req, res) => 
 });
 
 /** PATCH /journeys/:id — update name + graph (admin/RM). */
-journeysRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+journeysRouter.patch("/:id", requirePermission("journeys.manage"), async (req, res) => {
   const parsed = bodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const j = await prisma.journey.findFirst({
@@ -118,7 +118,7 @@ journeysRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** PATCH /journeys/:id/status — activate/deactivate (admin/RM). */
-journeysRouter.patch("/:id/status", requireRole("ADMIN", "RM"), async (req, res) => {
+journeysRouter.patch("/:id/status", requirePermission("journeys.manage"), async (req, res) => {
   const status = req.body?.status;
   if (status !== "ACTIVE" && status !== "DRAFT") {
     return res.status(400).json({ error: "status must be ACTIVE or DRAFT" });
@@ -132,7 +132,7 @@ journeysRouter.patch("/:id/status", requireRole("ADMIN", "RM"), async (req, res)
 });
 
 /** POST /journeys/:id/test — run the journey now against a test phone. */
-journeysRouter.post("/:id/test", requireRole("ADMIN", "RM"), async (req, res) => {
+journeysRouter.post("/:id/test", requirePermission("journeys.manage"), async (req, res) => {
   const phone = String(req.body?.phone || "").replace(/[^\d]/g, "");
   if (!phone) return res.status(400).json({ error: "phone required" });
 
@@ -160,7 +160,7 @@ journeysRouter.post("/:id/test", requireRole("ADMIN", "RM"), async (req, res) =>
 });
 
 /** DELETE /journeys/:id (admin/RM). */
-journeysRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+journeysRouter.delete("/:id", requirePermission("journeys.manage"), async (req, res) => {
   const j = await prisma.journey.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

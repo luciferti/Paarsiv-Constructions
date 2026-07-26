@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 
 export const quickRepliesRouter = Router();
 quickRepliesRouter.use(requireAuth);
@@ -18,7 +18,7 @@ quickRepliesRouter.get("/", async (req, res) => {
 const schema = z.object({ title: z.string().min(1), body: z.string().min(1) });
 
 /** POST /quick-replies — create (admin/RM). */
-quickRepliesRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+quickRepliesRouter.post("/", requirePermission("templates.manage"), async (req, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "title and body required" });
   const exists = await prisma.quickReply.findFirst({
@@ -32,7 +32,7 @@ quickRepliesRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** DELETE /quick-replies/:id (admin/RM). */
-quickRepliesRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+quickRepliesRouter.delete("/:id", requirePermission("templates.manage"), async (req, res) => {
   const r = await prisma.quickReply.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

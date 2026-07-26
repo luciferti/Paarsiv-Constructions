@@ -6,6 +6,7 @@ import { signToken } from "../lib/jwt";
 import { requireAuth } from "../middleware/auth";
 import { issueRefreshToken, rotateRefreshToken, revokeUserRefreshTokens } from "../lib/refresh";
 import { auditRaw, audit } from "../lib/audit";
+import { effectivePermissions } from "../lib/permissions";
 
 export const authRouter = Router();
 
@@ -40,6 +41,7 @@ authRouter.post("/login", async (req, res) => {
     tenantId: tenant.id,
     role: user.role,
     username: user.username,
+    permissions: user.permissions,
   });
   const refreshToken = await issueRefreshToken(user.id);
 
@@ -58,6 +60,7 @@ authRouter.post("/login", async (req, res) => {
       displayName: user.displayName,
       role: user.role,
       team: user.team,
+      permissions: effectivePermissions(user),
     },
     tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
   });
@@ -81,6 +84,7 @@ authRouter.post("/refresh", async (req, res) => {
     tenantId: tenant.id,
     role: user.role,
     username: user.username,
+    permissions: user.permissions,
   });
   res.json({ token, refreshToken: rotated.token });
 });
@@ -106,8 +110,9 @@ authRouter.get("/me", requireAuth, async (req, res) => {
       role: true,
       team: true,
       presence: true,
+      permissions: true,
     },
   });
   if (!user) return res.status(404).json({ error: "not found" });
-  res.json({ user });
+  res.json({ user: { ...user, permissions: effectivePermissions(user) } });
 });

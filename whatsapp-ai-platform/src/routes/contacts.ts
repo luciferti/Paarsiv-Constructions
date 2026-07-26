@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { audit } from "../lib/audit";
 import { findDuplicates, mergeContacts, mergeRulesOf, pickSurvivor } from "../services/merge";
@@ -63,7 +63,7 @@ const contactSchema = z.object({
 });
 
 /** POST /contacts — create/upsert one contact (admin/RM). */
-contactsRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+contactsRouter.post("/", requirePermission("contacts.edit"), async (req, res) => {
   const parsed = contactSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const d = parsed.data;
@@ -111,7 +111,7 @@ const importSchema = z.object({
 });
 
 /** POST /contacts/import — bulk upsert (admin/RM). */
-contactsRouter.post("/import", requireRole("ADMIN", "RM"), async (req, res) => {
+contactsRouter.post("/import", requirePermission("contacts.import"), async (req, res) => {
   const parsed = importSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
@@ -163,7 +163,7 @@ const patchSchema = z.object({
 });
 
 /** PATCH /contacts/:id — update profile fields (admin/RM). */
-contactsRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+contactsRouter.patch("/:id", requirePermission("contacts.edit"), async (req, res) => {
   const parsed = patchSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const c = await prisma.contact.findFirst({
@@ -314,7 +314,7 @@ contactsRouter.get("/:id/360", async (req, res) => {
 });
 
 /** GET /contacts/duplicates — duplicate groups per the tenant's merge rules. */
-contactsRouter.get("/duplicates", requireRole("ADMIN", "RM"), async (req, res) => {
+contactsRouter.get("/duplicates", requirePermission("contacts.import"), async (req, res) => {
   const tenant = await prisma.tenant.findUnique({ where: { id: req.auth!.tenantId } });
   if (!tenant) return res.status(404).json({ error: "tenant missing" });
   const rules = mergeRulesOf(tenant.mergeRules);
@@ -334,7 +334,7 @@ const mergeSchema = z.object({
   primaryId: z.string().min(1),
   duplicateIds: z.array(z.string().min(1)).min(1).max(20),
 });
-contactsRouter.post("/merge", requireRole("ADMIN", "RM"), async (req, res) => {
+contactsRouter.post("/merge", requirePermission("contacts.import"), async (req, res) => {
   const parsed = mergeSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   try {
@@ -351,7 +351,7 @@ contactsRouter.post("/merge", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** DELETE /contacts/:id (admin/RM). */
-contactsRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+contactsRouter.delete("/:id", requirePermission("contacts.delete"), async (req, res) => {
   const c = await prisma.contact.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });

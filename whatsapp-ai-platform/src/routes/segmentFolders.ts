@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { requireAuth, requirePermission } from "../middleware/auth";
 
 export const segmentFoldersRouter = Router();
 segmentFoldersRouter.use(requireAuth);
@@ -16,7 +16,7 @@ segmentFoldersRouter.get("/", async (req, res) => {
 });
 
 /** POST /segment-folders — create (admin/RM). */
-segmentFoldersRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
+segmentFoldersRouter.post("/", requirePermission("segments.manage"), async (req, res) => {
   const name = z.string().min(1).safeParse(req.body?.name);
   if (!name.success) return res.status(400).json({ error: "name required" });
   const exists = await prisma.segmentFolder.findFirst({
@@ -30,7 +30,7 @@ segmentFoldersRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
 });
 
 /** DELETE /segment-folders/:id — segments inside are un-foldered, not deleted. */
-segmentFoldersRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
+segmentFoldersRouter.delete("/:id", requirePermission("segments.manage"), async (req, res) => {
   const f = await prisma.segmentFolder.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });
