@@ -474,7 +474,9 @@ model Journey {
   status       String   @default("DRAFT") // DRAFT | ACTIVE
   triggerType  String   @default("keyword") // keyword | new_contact
   triggerValue String?  // keyword text when triggerType = keyword
-  steps        Json     @default("[]")
+  steps        Json     @default("[]")   // linear steps derived from the graph (runner)
+  nodes        Json     @default("[]")   // visual builder nodes [{id,type,position,data}]
+  edges        Json     @default("[]")   // visual builder edges [{id,source,target}]
   createdAt    DateTime @default(now())
 
   @@unique([tenantId, name])

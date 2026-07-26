@@ -4,10 +4,11 @@ import { sendOutbound } from "./outbound";
 import type { Tenant } from "@prisma/client";
 
 export interface JourneyStep {
-  type: "message" | "wait";
+  type: "message" | "wait" | "handoff" | "tag";
   text?: string; // message step
   templateId?: string; // message step (alternative to text)
   hours?: number; // wait step
+  tag?: string; // tag step
 }
 
 const MAX_WAIT_MS = 60_000; // cap real waits in this simplified runner
@@ -45,6 +46,37 @@ export async function runJourney(
     if (step.type === "message") {
       const text = await resolveMessage(tenant.id, step, ctx);
       if (text) await sendOutbound(tenant, ctx.phone, text, "AI");
+      continue;
+    }
+    if (step.type === "handoff") {
+      // Stop AI auto-replies for this conversation so a human takes over.
+      await prisma.conversation.updateMany({
+        where: { tenantId: tenant.id, phone: ctx.phone },
+        data: { mode: "HUMAN" },
+      });
+      continue;
+    }
+    if (step.type === "tag" && step.tag) {
+      // Anyone we message belongs in the audience — create the contact if new.
+      const contact = await prisma.contact.findFirst({
+        where: { tenantId: tenant.id, OR: [{ phone: ctx.phone }, { altPhones: { has: ctx.phone } }] },
+      });
+      if (!contact) {
+        await prisma.contact.create({
+          data: {
+            tenantId: tenant.id,
+            phone: ctx.phone,
+            name: ctx.name ?? undefined,
+            tags: [step.tag],
+            source: "inbound",
+          },
+        });
+      } else if (!contact.tags.includes(step.tag)) {
+        await prisma.contact.update({
+          where: { id: contact.id },
+          data: { tags: [...contact.tags, step.tag] },
+        });
+      }
     }
   }
 }

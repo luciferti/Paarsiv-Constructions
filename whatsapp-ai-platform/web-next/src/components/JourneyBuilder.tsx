@@ -1,0 +1,352 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import ReactFlow, {
+  addEdge, Background, Controls, Handle, MarkerType, Position, ReactFlowProvider,
+  useEdgesState, useNodesState, useReactFlow,
+  type Connection, type Edge, type Node, type NodeProps,
+} from "reactflow";
+import "reactflow/dist/style.css";
+import {
+  ArrowLeft, Loader2, MessageSquare, Tag as TagIcon, Timer, Trash2, UserCheck, Zap,
+} from "lucide-react";
+import clsx from "clsx";
+import { api } from "@/lib/api";
+import type { Journey, Template } from "@/lib/types";
+
+type Kind = "trigger" | "message" | "wait" | "handoff" | "tag";
+
+interface NodeData {
+  kind: Kind;
+  label?: string;
+  triggerType?: string;
+  triggerValue?: string;
+  text?: string;
+  templateId?: string;
+  hours?: number;
+  tag?: string;
+}
+
+const PALETTE: { kind: Kind; label: string; desc: string; icon: React.ElementType; color: string }[] = [
+  { kind: "trigger", label: "Trigger", desc: "Starts the journey", icon: Zap, color: "text-primary" },
+  { kind: "message", label: "Send message", desc: "WhatsApp message", icon: MessageSquare, color: "text-primary" },
+  { kind: "wait", label: "Wait", desc: "Pause before next step", icon: Timer, color: "text-warning" },
+  { kind: "handoff", label: "Handoff to agent", desc: "Stop AI, notify team", icon: UserCheck, color: "text-success" },
+  { kind: "tag", label: "Add tag", desc: "Tag the contact", icon: TagIcon, color: "text-muted-foreground" },
+];
+
+const META: Record<Kind, { icon: React.ElementType; label: string; ring: string; badge: string }> = {
+  trigger: { icon: Zap, label: "Trigger", ring: "border-primary", badge: "bg-primary/15 text-primary" },
+  message: { icon: MessageSquare, label: "Send message", ring: "border-border", badge: "bg-accent text-accent-foreground" },
+  wait: { icon: Timer, label: "Wait", ring: "border-border", badge: "bg-warning/15 text-warning" },
+  handoff: { icon: UserCheck, label: "Handoff", ring: "border-border", badge: "bg-success/15 text-success" },
+  tag: { icon: TagIcon, label: "Add tag", ring: "border-border", badge: "bg-muted text-muted-foreground" },
+};
+
+/** One canvas node — icon, title and a one-line summary of its config. */
+function FlowNode({ data, selected }: NodeProps<NodeData>) {
+  const meta = META[data.kind] || META.message;
+  const Icon = meta.icon;
+  const summary =
+    data.kind === "trigger" ? (data.triggerValue ? `keyword: “${data.triggerValue}”` : "set a keyword")
+    : data.kind === "message" ? (data.text?.slice(0, 42) || "write a message")
+    : data.kind === "wait" ? `${data.hours ?? 0} hours`
+    : data.kind === "handoff" ? "conversation goes to a human"
+    : data.tag ? `tag: ${data.tag}` : "set a tag";
+
+  return (
+    <div className={clsx(
+      "w-56 rounded-xl border-2 bg-card shadow-card px-3 py-2.5 transition-all",
+      selected ? "border-primary ring-2 ring-primary/20" : meta.ring
+    )}>
+      {data.kind !== "trigger" && <Handle type="target" position={Position.Top} className="!w-2.5 !h-2.5 !bg-primary" />}
+      <div className="flex items-center gap-2">
+        <span className={clsx("w-7 h-7 rounded-lg grid place-items-center shrink-0", meta.badge)}>
+          <Icon className="w-3.5 h-3.5" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold leading-tight">{meta.label}</div>
+          <div className="text-[11px] text-muted-foreground truncate">{summary}</div>
+        </div>
+      </div>
+      <Handle type="source" position={Position.Bottom} className="!w-2.5 !h-2.5 !bg-primary" />
+    </div>
+  );
+}
+
+const nodeTypes = { flowNode: FlowNode };
+
+const btnPri = "h-9 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50";
+const btnGhost = "h-9 px-4 rounded-lg border text-sm font-medium hover:bg-muted";
+const input = "w-full h-9 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-ring";
+
+function BuilderInner({ journeyId }: { journeyId?: string }) {
+  const router = useRouter();
+  const { screenToFlowPosition } = useReactFlow();
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const [name, setName] = useState("");
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loading, setLoading] = useState(!!journeyId);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const initialNodes: Node<NodeData>[] = useMemo(() => ([
+    { id: "trigger-1", type: "flowNode", position: { x: 240, y: 40 }, data: { kind: "trigger", triggerType: "keyword", triggerValue: "" } },
+  ]), []);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<NodeData>(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  useEffect(() => {
+    api.get<{ templates: Template[] }>("/templates").then((r) => setTemplates(r.templates)).catch(() => {});
+    if (!journeyId) return;
+    api.get<{ journeys: Journey[] }>("/journeys")
+      .then((r) => {
+        const j = r.journeys.find((x) => x.id === journeyId);
+        if (!j) return;
+        setName(j.name);
+        const savedNodes = (j.nodes || []) as unknown as Node<NodeData>[];
+        if (savedNodes.length) {
+          setNodes(savedNodes.map((n) => ({ ...n, type: "flowNode" })));
+          setEdges(((j.edges || []) as unknown as Edge[]).map((e) => ({
+            ...e, markerEnd: { type: MarkerType.ArrowClosed }, style: { strokeWidth: 2 },
+          })));
+        } else {
+          // migrate a legacy linear journey into the canvas
+          const migrated: Node<NodeData>[] = [
+            { id: "trigger-1", type: "flowNode", position: { x: 240, y: 40 }, data: { kind: "trigger", triggerType: j.triggerType, triggerValue: j.triggerValue || "" } },
+            ...(j.steps || []).map((s, i) => ({
+              id: `n${i}`,
+              type: "flowNode",
+              position: { x: 240, y: 160 + i * 120 },
+              data: (s.type === "wait" ? { kind: "wait", hours: s.hours } : { kind: "message", text: s.text }) as NodeData,
+            })),
+          ];
+          setNodes(migrated);
+          setEdges(migrated.slice(0, -1).map((n, i) => ({
+            id: `e${i}`, source: n.id, target: migrated[i + 1].id,
+            markerEnd: { type: MarkerType.ArrowClosed }, style: { strokeWidth: 2 },
+          })));
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [journeyId, setNodes, setEdges]);
+
+  const onConnect = useCallback(
+    (c: Connection) => setEdges((eds) => addEdge({ ...c, markerEnd: { type: MarkerType.ArrowClosed }, style: { strokeWidth: 2 } }, eds)),
+    [setEdges]
+  );
+
+  function addNode(kind: Kind, at?: { x: number; y: number }) {
+    const id = `${kind}-${Date.now()}`;
+    const position = at || { x: 240, y: 160 + nodes.length * 120 };
+    const data: NodeData =
+      kind === "wait" ? { kind, hours: 24 }
+      : kind === "trigger" ? { kind, triggerType: "keyword", triggerValue: "" }
+      : { kind };
+    setNodes((ns) => [...ns, { id, type: "flowNode", position, data }]);
+    setSelectedId(id);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const kind = e.dataTransfer.getData("application/journey-node") as Kind;
+    if (!kind) return;
+    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    addNode(kind, position);
+  }
+
+  const selected = nodes.find((n) => n.id === selectedId) || null;
+  function updateSelected(patch: Partial<NodeData>) {
+    if (!selectedId) return;
+    setNodes((ns) => ns.map((n) => (n.id === selectedId ? { ...n, data: { ...n.data, ...patch } } : n)));
+  }
+  function deleteSelected() {
+    if (!selectedId) return;
+    setNodes((ns) => ns.filter((n) => n.id !== selectedId));
+    setEdges((es) => es.filter((e) => e.source !== selectedId && e.target !== selectedId));
+    setSelectedId(null);
+  }
+
+  async function save() {
+    setErr(null);
+    if (!name.trim()) { setErr("Give the journey a name."); return; }
+    const trigger = nodes.find((n) => n.data.kind === "trigger");
+    if (!trigger?.data.triggerValue?.trim()) { setErr("Set a trigger keyword."); return; }
+    setSaving(true);
+    const payload = {
+      name: name.trim(),
+      nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })),
+      edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target })),
+    };
+    try {
+      if (journeyId) await api.patch(`/journeys/${journeyId}`, payload);
+      else await api.post("/journeys", payload);
+      router.push("/journeys");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save the journey.");
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return <div className="flex-1 grid place-items-center"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>;
+  }
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* top bar */}
+      <div className="h-16 shrink-0 border-b bg-card/60 flex items-center gap-3 px-6">
+        <button onClick={() => router.push("/journeys")} className="p-2 -ml-2 rounded-lg hover:bg-muted"><ArrowLeft className="w-4 h-4" /></button>
+        <input
+          className="h-9 px-3 rounded-lg border bg-background text-sm font-medium w-64 outline-none focus:ring-2 focus:ring-ring"
+          value={name} placeholder="Journey name" onChange={(e) => setName(e.target.value)}
+        />
+        <span className="text-xs text-muted-foreground">Drag blocks onto the canvas, then connect them</span>
+        <div className="flex-1" />
+        {err && <span className="text-xs text-destructive mr-2">{err}</span>}
+        <button className={btnGhost} onClick={() => router.push("/journeys")}>Cancel</button>
+        <button className={btnPri} onClick={save} disabled={saving}>
+          {saving && <Loader2 className="w-3.5 h-3.5 inline mr-1.5 animate-spin" />}
+          {journeyId ? "Save journey" : "Create journey"}
+        </button>
+      </div>
+
+      <div className="flex-1 min-h-0 flex">
+        {/* palette */}
+        <aside className="w-56 shrink-0 border-r bg-card p-3 overflow-y-auto">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2 px-1">Blocks</div>
+          <div className="space-y-2">
+            {PALETTE.map((p) => {
+              const Icon = p.icon;
+              return (
+                <div
+                  key={p.kind}
+                  draggable
+                  onDragStart={(e) => { e.dataTransfer.setData("application/journey-node", p.kind); e.dataTransfer.effectAllowed = "move"; }}
+                  onDoubleClick={() => addNode(p.kind)}
+                  className="rounded-xl border bg-background p-2.5 cursor-grab active:cursor-grabbing hover:border-primary transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={clsx("w-7 h-7 rounded-lg grid place-items-center bg-muted", p.color)}>
+                      <Icon className="w-3.5 h-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium leading-tight">{p.label}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{p.desc}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-3 px-1 leading-relaxed">
+            Drag a block onto the canvas (or double-click it). Drag from a node&apos;s bottom dot to another node&apos;s top dot to connect them.
+          </p>
+        </aside>
+
+        {/* canvas */}
+        <div ref={wrapRef} className="flex-1 min-w-0" onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={(_, n) => setSelectedId(n.id)}
+            onPaneClick={() => setSelectedId(null)}
+            nodeTypes={nodeTypes}
+            fitView
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background gap={16} size={1} />
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        </div>
+
+        {/* properties */}
+        <aside className="w-72 shrink-0 border-l bg-card overflow-y-auto">
+          {selected ? (
+            <div className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold">{META[selected.data.kind].label}</span>
+                {selected.data.kind !== "trigger" && (
+                  <button onClick={deleteSelected} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-destructive">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {selected.data.kind === "trigger" && (
+                <>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Start when a message contains</label>
+                    <input className={clsx(input, "mt-1")} value={selected.data.triggerValue || ""} placeholder="brochure"
+                      onChange={(e) => updateSelected({ triggerValue: e.target.value })} />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">The journey runs instead of the usual AI reply when this keyword appears.</p>
+                </>
+              )}
+
+              {selected.data.kind === "message" && (
+                <>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Message text</label>
+                    <textarea rows={5} className="mt-1 w-full px-3 py-2 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-ring resize-y"
+                      value={selected.data.text || ""} placeholder="Hi {{name}}, here is our brochure…"
+                      onChange={(e) => updateSelected({ text: e.target.value, templateId: "" })} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">…or send a template</label>
+                    <select className={clsx(input, "mt-1")} value={selected.data.templateId || ""}
+                      onChange={(e) => updateSelected({ templateId: e.target.value })}>
+                      <option value="">No template</option>
+                      {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {selected.data.kind === "wait" && (
+                <div>
+                  <label className="text-xs text-muted-foreground">Wait for (hours)</label>
+                  <input type="number" min={0} className={clsx(input, "mt-1")} value={selected.data.hours ?? 0}
+                    onChange={(e) => updateSelected({ hours: Number(e.target.value) })} />
+                </div>
+              )}
+
+              {selected.data.kind === "handoff" && (
+                <p className="text-xs text-muted-foreground">
+                  Switches the conversation to Human mode so AI stops replying and your team takes over.
+                </p>
+              )}
+
+              {selected.data.kind === "tag" && (
+                <div>
+                  <label className="text-xs text-muted-foreground">Tag to add</label>
+                  <input className={clsx(input, "mt-1")} value={selected.data.tag || ""} placeholder="hot-lead"
+                    onChange={(e) => updateSelected({ tag: e.target.value })} />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="p-6 text-center text-xs text-muted-foreground">
+              Select a block on the canvas to edit it.
+            </div>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+export default function JourneyBuilder({ journeyId }: { journeyId?: string }) {
+  return (
+    <ReactFlowProvider>
+      <BuilderInner journeyId={journeyId} />
+    </ReactFlowProvider>
+  );
+}

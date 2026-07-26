@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { FlaskConical, MessageSquare, Pause, Play, Timer, Trash2, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { FlaskConical, MessageSquare, Pause, Play, Timer, Trash2, UserCheck, Tag as TagIcon } from "lucide-react";
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
 import type { Journey, JourneyStep } from "@/lib/types";
@@ -11,30 +12,15 @@ const btnPri = "h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs f
 const btnGhost = "h-8 px-3 rounded-lg border text-xs font-medium hover:bg-muted";
 
 export default function JourneysPage() {
+  const router = useRouter();
   const session = typeof window !== "undefined" ? getSession() : null;
   const canEdit = session?.user.role === "ADMIN" || session?.user.role === "RM";
   const [journeys, setJourneys] = useState<Journey[]>([]);
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [keyword, setKeyword] = useState("");
-  const [steps, setSteps] = useState<JourneyStep[]>([{ type: "message", text: "" }]);
 
   const load = useCallback(() => {
     api.get<{ journeys: Journey[] }>("/journeys").then((r) => setJourneys(r.journeys)).catch(() => {});
   }, []);
   useEffect(load, [load]);
-
-  function updateStep(i: number, patch: Partial<JourneyStep>) {
-    setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
-  }
-
-  async function create() {
-    if (!name.trim() || !keyword.trim()) return;
-    const clean = steps.filter((s) => (s.type === "message" ? (s.text || "").trim() : true));
-    await api.post("/journeys", { name: name.trim(), triggerType: "keyword", triggerValue: keyword.trim(), steps: clean });
-    setName(""); setKeyword(""); setSteps([{ type: "message", text: "" }]);
-    setOpen(false); load();
-  }
 
   async function toggle(j: Journey) {
     await api.patch(`/journeys/${j.id}/status`, { status: j.status === "ACTIVE" ? "DRAFT" : "ACTIVE" });
@@ -55,7 +41,7 @@ export default function JourneysPage() {
           <p className="text-sm text-muted-foreground mt-0.5">When a customer message contains a keyword, run these steps</p>
         </div>
         <div className="flex-1" />
-        {canEdit && <button className={btnPri} onClick={() => setOpen(true)}>+ New journey</button>}
+        {canEdit && <button className={btnPri} onClick={() => router.push('/journeys/new')}>+ New journey</button>}
       </div>
 
       <div className="p-8 max-w-5xl space-y-4">
@@ -73,6 +59,7 @@ export default function JourneysPage() {
               <div className="flex-1" />
               {canEdit && (
                 <>
+                  <button className={btnGhost} onClick={() => router.push(`/journeys/${j.id}`)}>Edit</button>
                   <button className={btnGhost} onClick={() => test(j)}>
                     <FlaskConical className="w-3 h-3 inline mr-1" />Test
                   </button>
@@ -91,10 +78,18 @@ export default function JourneysPage() {
                 <div key={i} className="flex items-center gap-2">
                   <div className={clsx(
                     "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border",
-                    s.type === "message" ? "bg-accent/60 text-accent-foreground" : "bg-muted text-muted-foreground"
+                    s.type === "message" ? "bg-accent/60 text-accent-foreground"
+                      : s.type === "handoff" ? "bg-success/15 text-success"
+                      : "bg-muted text-muted-foreground"
                   )}>
-                    {s.type === "message" ? <MessageSquare className="w-3 h-3" /> : <Timer className="w-3 h-3" />}
-                    {s.type === "message" ? (s.text || "").slice(0, 36) + ((s.text || "").length > 36 ? "…" : "") : `wait ${s.hours}h`}
+                    {s.type === "message" ? <MessageSquare className="w-3 h-3" />
+                      : s.type === "wait" ? <Timer className="w-3 h-3" />
+                      : s.type === "handoff" ? <UserCheck className="w-3 h-3" />
+                      : <TagIcon className="w-3 h-3" />}
+                    {s.type === "message" ? (s.text || "").slice(0, 36) + ((s.text || "").length > 36 ? "…" : "")
+                      : s.type === "wait" ? `wait ${s.hours}h`
+                      : s.type === "handoff" ? "handoff to agent"
+                      : `tag ${s.tag || ""}`}
                   </div>
                   {i < j.steps.length - 1 && <span className="text-muted-foreground">→</span>}
                 </div>
@@ -105,60 +100,6 @@ export default function JourneysPage() {
         {journeys.length === 0 && <p className="text-sm text-muted-foreground">No journeys yet.</p>}
       </div>
 
-      {open && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={() => setOpen(false)}>
-          <div className="w-[440px] max-w-[92vw] h-full bg-card border-l flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b flex items-center justify-between">
-              <span className="font-semibold">New journey</span>
-              <button onClick={() => setOpen(false)} className="p-1.5 rounded-md hover:bg-muted"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-3 text-sm">
-              <div>
-                <label className="text-xs text-muted-foreground">Name</label>
-                <input className={clsx(inputCls, "mt-1")} value={name} onChange={(e) => setName(e.target.value)} placeholder="Brochure follow-up" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Trigger when message contains</label>
-                <input className={clsx(inputCls, "mt-1")} value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="brochure" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Steps</label>
-                {steps.map((s, i) => (
-                  <div key={i} className="flex gap-1.5 mt-1.5 items-center">
-                    <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-[11px] grid place-items-center font-bold shrink-0">{i + 1}</span>
-                    <select
-                      className="h-9 px-2 rounded-lg border bg-background text-xs"
-                      value={s.type}
-                      onChange={(e) => updateStep(i, e.target.value === "wait" ? { type: "wait", hours: 24, text: undefined } : { type: "message", text: "" })}
-                    >
-                      <option value="message">Send message</option>
-                      <option value="wait">Wait</option>
-                    </select>
-                    {s.type === "message" ? (
-                      <input className="h-9 px-2 rounded-lg border bg-background text-xs flex-1" value={s.text || ""} placeholder="Message… use {{name}}" onChange={(e) => updateStep(i, { text: e.target.value })} />
-                    ) : (
-                      <span className="flex items-center gap-1.5">
-                        <input type="number" min={0} className="h-9 w-16 px-2 rounded-lg border bg-background text-xs" value={s.hours ?? 0} onChange={(e) => updateStep(i, { hours: Number(e.target.value) })} />
-                        <span className="text-xs text-muted-foreground">hours</span>
-                      </span>
-                    )}
-                    {steps.length > 1 && <button className={btnGhost} onClick={() => setSteps((p) => p.filter((_, idx) => idx !== i))}>×</button>}
-                  </div>
-                ))}
-                <div className="flex gap-2 mt-2">
-                  <button className={btnGhost} onClick={() => setSteps((p) => [...p, { type: "message", text: "" }])}>+ message</button>
-                  <button className={btnGhost} onClick={() => setSteps((p) => [...p, { type: "wait", hours: 24 }])}>+ wait</button>
-                </div>
-              </div>
-            </div>
-            <div className="px-5 py-3.5 border-t flex items-center gap-2">
-              <div className="flex-1" />
-              <button className={btnGhost} onClick={() => setOpen(false)}>Cancel</button>
-              <button className={btnPri} disabled={!name.trim() || !keyword.trim()} onClick={create}>Save journey</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -150,9 +150,10 @@ export interface Folder {
 }
 
 export interface JourneyStep {
-  type: "message" | "wait";
+  type: "message" | "wait" | "handoff" | "tag";
   text?: string;
   hours?: number;
+  tag?: string;
 }
 export interface Journey {
   id: string;
@@ -161,6 +162,8 @@ export interface Journey {
   triggerType: string;
   triggerValue?: string | null;
   steps: JourneyStep[];
+  nodes?: unknown[];
+  edges?: unknown[];
   createdAt: string;
 }
 
