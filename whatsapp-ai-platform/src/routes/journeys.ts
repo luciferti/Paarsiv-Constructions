@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAuth, requireRole } from "../middleware/auth";
-import { runJourney, type JourneyStep } from "../services/journeys";
+import { runJourney, runJourneyGraph, type JourneyStep } from "../services/journeys";
 import { graphToSteps, triggerOf, type GraphEdge, type GraphNode } from "../lib/journeyGraph";
 
 export const journeysRouter = Router();
@@ -25,6 +25,8 @@ const edgeSchema = z.object({
   id: z.string().optional(),
   source: z.string(),
   target: z.string(),
+  // Which output the edge leaves from — "yes"/"no" on condition nodes.
+  sourceHandle: z.string().nullable().optional(),
 });
 const bodySchema = z.object({
   name: z.string().min(1),
@@ -125,6 +127,17 @@ journeysRouter.post("/:id/test", requireRole("ADMIN", "RM"), async (req, res) =>
   const tenant = await prisma.tenant.findUnique({ where: { id: req.auth!.tenantId } });
   if (!tenant) return res.status(404).json({ error: "tenant missing" });
 
+  const nodes = (j.nodes as unknown as { id: string; data?: Record<string, unknown> }[]) || [];
+  if (nodes.length) {
+    const edges = (j.edges as unknown as { source: string; target: string; sourceHandle?: string | null }[]) || [];
+    const triggerText = typeof req.body?.triggerText === "string" ? req.body.triggerText : (j.triggerValue || "");
+    const r = await runJourneyGraph(
+      tenant, nodes, edges,
+      { phone, name: "Test", triggerText },
+      { ignoreWaits: true }
+    );
+    return res.json({ ok: true, ran: r.messages, executed: r.executed });
+  }
   const steps = (j.steps as unknown as JourneyStep[]) || [];
   await runJourney(tenant, steps, { phone, name: "Test" }, { ignoreWaits: true });
   res.json({ ok: true, ran: steps.filter((s) => s.type === "message").length });

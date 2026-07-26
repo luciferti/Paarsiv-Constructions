@@ -9,13 +9,13 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import {
-  ArrowLeft, Loader2, MessageSquare, Plus, Tag as TagIcon, Timer, Trash2, UserCheck, Zap,
+  ArrowLeft, GitBranch, Loader2, MessageSquare, Plus, Tag as TagIcon, Timer, Trash2, UserCheck, Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import type { Journey, Template } from "@/lib/types";
 
-type Kind = "trigger" | "message" | "wait" | "handoff" | "tag";
+type Kind = "trigger" | "message" | "wait" | "handoff" | "tag" | "condition";
 
 interface NodeData {
   kind: Kind;
@@ -26,6 +26,8 @@ interface NodeData {
   templateId?: string;
   hours?: number;
   tag?: string;
+  check?: string;   // condition: has_tag | text_contains | replied | opted_in
+  value?: string;   // condition value
 }
 
 const PALETTE: { kind: Kind; label: string; desc: string; icon: React.ElementType; color: string }[] = [
@@ -34,6 +36,7 @@ const PALETTE: { kind: Kind; label: string; desc: string; icon: React.ElementTyp
   { kind: "wait", label: "Wait", desc: "Pause before next step", icon: Timer, color: "text-warning" },
   { kind: "handoff", label: "Handoff to agent", desc: "Stop AI, notify team", icon: UserCheck, color: "text-success" },
   { kind: "tag", label: "Add tag", desc: "Tag the contact", icon: TagIcon, color: "text-muted-foreground" },
+  { kind: "condition", label: "Condition", desc: "Split into yes / no paths", icon: GitBranch, color: "text-warning" },
 ];
 
 const META: Record<Kind, { icon: React.ElementType; label: string; ring: string; badge: string }> = {
@@ -42,7 +45,15 @@ const META: Record<Kind, { icon: React.ElementType; label: string; ring: string;
   wait: { icon: Timer, label: "Wait", ring: "border-border", badge: "bg-warning/15 text-warning" },
   handoff: { icon: UserCheck, label: "Handoff", ring: "border-border", badge: "bg-success/15 text-success" },
   tag: { icon: TagIcon, label: "Add tag", ring: "border-border", badge: "bg-muted text-muted-foreground" },
+  condition: { icon: GitBranch, label: "Condition", ring: "border-warning/50", badge: "bg-warning/15 text-warning" },
 };
+
+const CHECKS: { v: string; label: string; needsValue: boolean }[] = [
+  { v: "has_tag", label: "Contact has tag", needsValue: true },
+  { v: "text_contains", label: "Their message contains", needsValue: true },
+  { v: "replied", label: "Customer replied", needsValue: false },
+  { v: "opted_in", label: "Contact is opted in", needsValue: false },
+];
 
 /** One canvas node — icon, title and a one-line summary of its config. */
 function FlowNode({ data, selected }: NodeProps<NodeData>) {
@@ -53,6 +64,8 @@ function FlowNode({ data, selected }: NodeProps<NodeData>) {
     : data.kind === "message" ? (data.text?.slice(0, 42) || "write a message")
     : data.kind === "wait" ? `${data.hours ?? 0} hours`
     : data.kind === "handoff" ? "conversation goes to a human"
+    : data.kind === "condition"
+      ? `${CHECKS.find((c) => c.v === (data.check || "has_tag"))?.label || "check"}${data.value ? ` “${data.value}”` : ""}`
     : data.tag ? `tag: ${data.tag}` : "set a tag";
 
   return (
@@ -70,7 +83,18 @@ function FlowNode({ data, selected }: NodeProps<NodeData>) {
           <div className="text-[11px] text-muted-foreground truncate">{summary}</div>
         </div>
       </div>
-      <Handle type="source" position={Position.Bottom} className="!w-2.5 !h-2.5 !bg-primary" />
+      {data.kind === "condition" ? (
+        <>
+          <Handle id="yes" type="source" position={Position.Bottom} style={{ left: "28%" }} className="!w-2.5 !h-2.5 !bg-success" />
+          <Handle id="no" type="source" position={Position.Bottom} style={{ left: "72%" }} className="!w-2.5 !h-2.5 !bg-destructive" />
+          <div className="flex justify-between px-1 mt-1.5 text-[9px] font-semibold">
+            <span className="text-success">YES</span>
+            <span className="text-destructive">NO</span>
+          </div>
+        </>
+      ) : (
+        <Handle type="source" position={Position.Bottom} className="!w-2.5 !h-2.5 !bg-primary" />
+      )}
     </div>
   );
 }
@@ -110,9 +134,18 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
         setName(j.name);
         const savedNodes = (j.nodes || []) as unknown as Node<NodeData>[];
         if (savedNodes.length) {
-          setNodes(savedNodes.map((n) => ({ ...n, type: "flowNode" })));
+          // Nodes created through the API may have no position — lay them out.
+          setNodes(savedNodes.map((n, i) => ({
+            ...n,
+            type: "flowNode",
+            position: n.position ?? { x: 240, y: 40 + i * 130 },
+            data: n.data ?? ({ kind: "message" } as NodeData),
+          })));
           setEdges(((j.edges || []) as unknown as Edge[]).map((e) => ({
-            ...e, markerEnd: { type: MarkerType.ArrowClosed }, style: { strokeWidth: 2 },
+            ...e,
+            label: e.sourceHandle === "no" ? "no" : e.sourceHandle === "yes" ? "yes" : undefined,
+            labelStyle: { fontSize: 10, fontWeight: 600 },
+            markerEnd: { type: MarkerType.ArrowClosed }, style: { strokeWidth: 2 },
           })));
         } else {
           // migrate a legacy linear journey into the canvas
@@ -136,7 +169,13 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
   }, [journeyId, setNodes, setEdges]);
 
   const onConnect = useCallback(
-    (c: Connection) => setEdges((eds) => addEdge({ ...c, markerEnd: { type: MarkerType.ArrowClosed }, style: { strokeWidth: 2 } }, eds)),
+    (c: Connection) => setEdges((eds) => addEdge({
+      ...c,
+      label: c.sourceHandle === "no" ? "no" : c.sourceHandle === "yes" ? "yes" : undefined,
+      labelStyle: { fontSize: 10, fontWeight: 600 },
+      markerEnd: { type: MarkerType.ArrowClosed },
+      style: { strokeWidth: 2 },
+    }, eds)),
     [setEdges]
   );
 
@@ -149,10 +188,12 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
     const data: NodeData =
       kind === "wait" ? { kind, hours: 24 }
       : kind === "trigger" ? { kind, triggerType: "keyword", triggerValue: "" }
+      : kind === "condition" ? { kind, check: "has_tag", value: "" }
       : { kind };
 
     // The node with no outgoing edge is the tail of the current flow.
-    const tail = nodes.find((n) => !edges.some((e) => e.source === n.id));
+    // Conditions need explicit yes/no wiring, so never auto-connect from one.
+    const tail = nodes.find((n) => n.data.kind !== "condition" && !edges.some((e) => e.source === n.id));
     const position = at || {
       x: tail?.position.x ?? 240,
       y: (tail?.position.y ?? 40) + 130,
@@ -204,7 +245,7 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
     const payload = {
       name: name.trim(),
       nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })),
-      edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target })),
+      edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null })),
     };
     try {
       if (journeyId) await api.patch(`/journeys/${journeyId}`, payload);
@@ -354,6 +395,28 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
                 <p className="text-xs text-muted-foreground">
                   Switches the conversation to Human mode so AI stops replying and your team takes over.
                 </p>
+              )}
+
+              {selected.data.kind === "condition" && (
+                <>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Check</label>
+                    <select className={clsx(input, "mt-1")} value={selected.data.check || "has_tag"}
+                      onChange={(e) => updateSelected({ check: e.target.value })}>
+                      {CHECKS.map((c) => <option key={c.v} value={c.v}>{c.label}</option>)}
+                    </select>
+                  </div>
+                  {CHECKS.find((c) => c.v === (selected.data.check || "has_tag"))?.needsValue && (
+                    <div>
+                      <label className="text-xs text-muted-foreground">Value</label>
+                      <input className={clsx(input, "mt-1")} value={selected.data.value || ""} placeholder="hot-lead"
+                        onChange={(e) => updateSelected({ value: e.target.value })} />
+                    </div>
+                  )}
+                  <p className="text-[11px] text-muted-foreground">
+                    Connect the green dot for the yes path and the red dot for the no path.
+                  </p>
+                </>
               )}
 
               {selected.data.kind === "tag" && (

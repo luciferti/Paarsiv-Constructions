@@ -81,6 +81,135 @@ export async function runJourney(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Graph execution (supports branching via condition nodes)
+// ---------------------------------------------------------------------------
+
+interface GraphNodeLike {
+  id: string;
+  data?: Record<string, unknown>;
+}
+interface GraphEdgeLike {
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+}
+
+export interface JourneyContext {
+  phone: string;
+  name?: string | null;
+  triggerText?: string; // the inbound message that started the journey
+  startedAt?: Date;
+}
+
+/** Evaluate a condition node against the contact/conversation right now. */
+async function evaluateCondition(
+  tenantId: string,
+  data: Record<string, unknown>,
+  ctx: JourneyContext
+): Promise<boolean> {
+  const check = String(data.check || "has_tag");
+  const value = String(data.value || "").trim().toLowerCase();
+
+  if (check === "text_contains") {
+    return !!value && (ctx.triggerText || "").toLowerCase().includes(value);
+  }
+
+  if (check === "has_tag") {
+    if (!value) return false;
+    const contact = await prisma.contact.findFirst({
+      where: { tenantId, OR: [{ phone: ctx.phone }, { altPhones: { has: ctx.phone } }] },
+      select: { tags: true },
+    });
+    return !!contact?.tags.some((t) => t.toLowerCase() === value);
+  }
+
+  if (check === "replied") {
+    // Any customer message after the journey started.
+    const since = ctx.startedAt ?? new Date(Date.now() - 60_000);
+    const conv = await prisma.conversation.findUnique({
+      where: { tenantId_phone: { tenantId, phone: ctx.phone } },
+      select: { id: true },
+    });
+    if (!conv) return false;
+    const reply = await prisma.message.findFirst({
+      where: { conversationId: conv.id, direction: "INBOUND", timestamp: { gt: since } },
+      select: { id: true },
+    });
+    return !!reply;
+  }
+
+  if (check === "opted_in") {
+    const contact = await prisma.contact.findFirst({
+      where: { tenantId, OR: [{ phone: ctx.phone }, { altPhones: { has: ctx.phone } }] },
+      select: { optedIn: true },
+    });
+    return !!contact?.optedIn;
+  }
+
+  return false;
+}
+
+/**
+ * Walk the journey graph from the trigger, executing each node and following
+ * the branch a condition resolves to. Cycles are guarded and the number of
+ * executed nodes is capped.
+ */
+export async function runJourneyGraph(
+  tenant: Tenant,
+  nodes: GraphNodeLike[],
+  edges: GraphEdgeLike[],
+  ctx: JourneyContext,
+  opts: { ignoreWaits?: boolean } = {}
+): Promise<{ executed: number; messages: number }> {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const outFrom = (id: string, handle?: string) =>
+    edges.filter(
+      (e) => e.source === id && (handle === undefined || (e.sourceHandle || "yes") === handle)
+    );
+
+  const start = nodes.find((n) => n.data?.kind === "trigger") || nodes[0];
+  if (!start) return { executed: 0, messages: 0 };
+
+  const context: JourneyContext = { ...ctx, startedAt: ctx.startedAt ?? new Date() };
+  let currentId: string | undefined = outFrom(start.id)[0]?.target;
+  const visited = new Set<string>();
+  let executed = 0;
+  let messages = 0;
+
+  while (currentId && !visited.has(currentId) && executed < 50) {
+    visited.add(currentId);
+    const node = byId.get(currentId);
+    if (!node) break;
+    const data = (node.data || {}) as Record<string, unknown>;
+    const kind = String(data.kind || "");
+    executed++;
+
+    if (kind === "condition") {
+      const result = await evaluateCondition(tenant.id, data, context);
+      currentId = outFrom(node.id, result ? "yes" : "no")[0]?.target;
+      continue;
+    }
+
+    const step: JourneyStep =
+      kind === "wait" ? { type: "wait", hours: Number(data.hours) || 0 }
+      : kind === "handoff" ? { type: "handoff" }
+      : kind === "tag" ? { type: "tag", tag: typeof data.tag === "string" ? data.tag : undefined }
+      : {
+          type: "message",
+          text: typeof data.text === "string" ? data.text : undefined,
+          templateId: typeof data.templateId === "string" && data.templateId ? data.templateId : undefined,
+        };
+
+    await runJourney(tenant, [step], { phone: context.phone, name: context.name }, opts);
+    if (step.type === "message") messages++;
+
+    currentId = outFrom(node.id)[0]?.target;
+  }
+
+  return { executed, messages };
+}
+
 /**
  * If any ACTIVE keyword journey matches this inbound text, run it and return
  * true (so the caller can skip the normal AI auto-reply). First match wins.
@@ -98,11 +227,13 @@ export async function tryTriggerJourney(
   for (const j of journeys) {
     const kw = (j.triggerValue || "").toLowerCase().trim();
     if (kw && hay.includes(kw)) {
-      const steps = (j.steps as unknown as JourneyStep[]) || [];
+      const nodes = (j.nodes as unknown as GraphNodeLike[]) || [];
+      const edges = (j.edges as unknown as GraphEdgeLike[]) || [];
       // fire-and-forget so inbound handling stays fast
-      runJourney(tenant, steps, { phone, name }).catch((e) =>
-        console.error("[journey] run error:", e?.message || e)
-      );
+      const run = nodes.length
+        ? runJourneyGraph(tenant, nodes, edges, { phone, name, triggerText: text })
+        : runJourney(tenant, (j.steps as unknown as JourneyStep[]) || [], { phone, name });
+      run.catch((e: Error) => console.error("[journey] run error:", e?.message || e));
       return true;
     }
   }

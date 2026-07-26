@@ -8,6 +8,7 @@ export interface GraphEdge {
   id?: string;
   source: string;
   target: string;
+  sourceHandle?: string | null;
 }
 
 export interface JourneyStep {
@@ -27,8 +28,10 @@ export function graphToSteps(nodes: GraphNode[], edges: GraphEdge[]): JourneySte
   if (!Array.isArray(nodes) || nodes.length === 0) return [];
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
+  // For the derived (display/legacy) path we follow the "yes" branch.
   const outgoing = new Map<string, string[]>();
   for (const e of edges || []) {
+    if (e.sourceHandle && e.sourceHandle !== "yes") continue;
     const arr = outgoing.get(e.source) || [];
     arr.push(e.target);
     outgoing.set(e.source, arr);
