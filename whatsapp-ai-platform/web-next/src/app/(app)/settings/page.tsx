@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, GitMerge, KeyRound, ScrollText, ShieldCheck, Webhook } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowRight, Copy, GitMerge, KeyRound, PlugZap, ScrollText, ShieldCheck, Webhook } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import type { ContactField } from "@/lib/types";
@@ -61,7 +62,16 @@ const DEFAULT_CONSENT: ConsentRules = {
   optInReply: "",
 };
 
-type Tab = "keys" | "merge" | "consent" | "audit" | "webhooks";
+interface WaStatus {
+  configured: boolean;
+  connected: boolean;
+  waba?: { name?: string | null };
+  number?: { display?: string | null };
+  webhookSubscribed: boolean;
+  error?: string | null;
+}
+
+type Tab = "whatsapp" | "keys" | "merge" | "consent" | "audit" | "webhooks";
 
 /** Comma-separated editing for a keyword list — one input, no chip fiddling. */
 function KeywordInput({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder: string }) {
@@ -76,7 +86,9 @@ function KeywordInput({ value, onChange, placeholder }: { value: string[]; onCha
 }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>("keys");
+  const router = useRouter();
+  const [tab, setTab] = useState<Tab>("whatsapp");
+  const [wa, setWa] = useState<WaStatus | null>(null);
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
@@ -98,6 +110,7 @@ export default function SettingsPage() {
         setConsent({ ...DEFAULT_CONSENT, ...(r.tenant.consentRules || {}) });
       }).catch(() => {});
     api.get<{ fields: ContactField[] }>("/contact-fields").then((r) => setFields(r.fields)).catch(() => {});
+    api.get<{ status: WaStatus }>("/whatsapp/status").then((r) => setWa(r.status)).catch(() => {});
   }, []);
   useEffect(load, [load]);
 
@@ -122,6 +135,7 @@ export default function SettingsPage() {
   }
 
   const TABS: { v: Tab; label: string; icon: React.ElementType }[] = [
+    { v: "whatsapp", label: "WhatsApp", icon: PlugZap },
     { v: "keys", label: "API keys", icon: KeyRound },
     { v: "merge", label: "Merge rules", icon: GitMerge },
     { v: "consent", label: "Opt-out rules", icon: ShieldCheck },
@@ -155,6 +169,40 @@ export default function SettingsPage() {
       </div>
 
       <div className="p-8 max-w-5xl">
+        {tab === "whatsapp" && (
+          <div className="max-w-2xl">
+            <button
+              onClick={() => router.push("/settings/whatsapp")}
+              className="w-full text-left rounded-xl border bg-card shadow-card p-6 hover:border-primary/50 transition-colors group"
+            >
+              <div className="flex items-start gap-4">
+                <div className={clsx(
+                  "w-11 h-11 rounded-xl grid place-items-center shrink-0",
+                  wa?.connected ? "bg-success/15 text-success" : "bg-warning/15 text-warning"
+                )}>
+                  <PlugZap className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[15px] font-semibold">
+                      {wa?.connected ? "WhatsApp is connected" : "Connect WhatsApp"}
+                    </h2>
+                    <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {wa?.connected
+                      ? `${wa.number?.display || "Number"}${wa.waba?.name ? ` · ${wa.waba.name}` : ""}${wa.webhookSubscribed ? "" : " · webhook not subscribed"}`
+                      : wa?.configured
+                        ? "Your Meta app is set up — one click finishes the connection."
+                        : "Sending is simulated until a real WhatsApp number is connected."}
+                  </p>
+                  {wa?.error && <p className="text-xs text-destructive mt-2">{wa.error}</p>}
+                </div>
+              </div>
+            </button>
+          </div>
+        )}
+
         {tab === "keys" && (
           <div className="space-y-4">
             {freshSecret && (

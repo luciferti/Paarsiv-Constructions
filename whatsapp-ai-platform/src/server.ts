@@ -16,6 +16,7 @@ import { authRouter } from "./routes/auth";
 import { webhookRouter } from "./routes/webhook";
 import { conversationsRouter } from "./routes/conversations";
 import { settingsRouter } from "./routes/settings";
+import { whatsappRouter } from "./routes/whatsapp";
 import { usersRouter } from "./routes/users";
 import { apiKeysRouter } from "./routes/apiKeys";
 import { aiAssistRouter } from "./routes/aiAssist";
@@ -82,6 +83,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/webhook", webhookRouter); // Meta WhatsApp callback (per tenant)
 app.use("/api/conversations", conversationsRouter); // inbox: list, thread, send, assign, mode
 app.use("/api/settings", settingsRouter); // AI Control Panel (engine, keys, knowledge config)
+app.use("/api/whatsapp", whatsappRouter); // Meta embedded signup: connect, verify, repair
 app.use("/api/users", usersRouter); // agents roster / presence / create
 app.use("/api/contacts", contactsRouter); // audience: list, create, import, delete
 app.use("/api/contact-fields", contactFieldsRouter); // custom field definitions

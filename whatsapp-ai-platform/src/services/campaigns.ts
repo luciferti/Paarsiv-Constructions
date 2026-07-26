@@ -54,26 +54,32 @@ export async function runCampaign(tenant: Tenant, campaignId: string) {
     read = 0,
     failed = 0;
 
+  // With a real number connected, delivered/read arrive on Meta's status
+  // webhooks — inventing them there would report numbers that never happened.
+  const live = !!(tenant.phoneNumberId && tenant.whatsappToken);
+
   for (const contact of audience) {
     const text = fillTokens(campaign.template.body, contact);
     const result = await sendWhatsAppText(tenant, contact.phone, text);
 
-    // Simulated delivery funnel for demo reporting (real status comes from
-    // Meta status webhooks once a live number is connected).
     let status: string;
     if (!result.ok) {
       status = "FAILED";
       failed++;
     } else {
       sent++;
-      const roll = Math.random();
-      if (roll < 0.85) {
-        delivered++;
-        if (roll < 0.55) {
-          read++;
-          status = "READ";
-        } else status = "DELIVERED";
-      } else status = "SENT";
+      status = "SENT";
+      if (!live) {
+        // Demo workspace: a plausible funnel so reporting has something to show.
+        const roll = Math.random();
+        if (roll < 0.85) {
+          delivered++;
+          if (roll < 0.55) {
+            read++;
+            status = "READ";
+          } else status = "DELIVERED";
+        }
+      }
     }
 
     await prisma.campaignRecipient.create({
@@ -83,6 +89,7 @@ export async function runCampaign(tenant: Tenant, campaignId: string) {
         phone: contact.phone,
         name: contact.name,
         status,
+        waMessageId: result.waMessageId || null,
         error: result.ok ? null : result.error,
         sentAt: result.ok ? new Date() : null,
       },

@@ -43,9 +43,12 @@ export function setSession(s: Session | null) {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** The full error payload — some endpoints attach detail worth showing. */
+  body?: unknown;
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -66,7 +69,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       setSession(null);
       window.location.href = "/login";
     }
-    throw new ApiError(res.status, (data as { error?: string })?.error || `HTTP ${res.status}`);
+    const raw = (data as { error?: unknown })?.error;
+    const message = typeof raw === "string" ? raw : `HTTP ${res.status}`;
+    throw new ApiError(res.status, message, data);
   }
   return data as T;
 }

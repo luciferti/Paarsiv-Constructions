@@ -1,0 +1,16 @@
+-- AlterTable
+ALTER TABLE "Tenant" ADD COLUMN     "businessId" TEXT,
+ADD COLUMN     "businessName" TEXT,
+ADD COLUMN     "businessVerification" TEXT,
+ADD COLUMN     "connectedAt" TIMESTAMP(3),
+ADD COLUMN     "connectionError" TEXT,
+ADD COLUMN     "displayPhoneNumber" TEXT,
+ADD COLUMN     "messagingLimit" TEXT,
+ADD COLUMN     "metaAppId" TEXT,
+ADD COLUMN     "metaAppSecret" TEXT,
+ADD COLUMN     "metaConfigId" TEXT,
+ADD COLUMN     "qualityRating" TEXT,
+ADD COLUMN     "verifiedName" TEXT,
+ADD COLUMN     "wabaName" TEXT,
+ADD COLUMN     "wabaReviewStatus" TEXT,
+ADD COLUMN     "webhookSubscribed" BOOLEAN NOT NULL DEFAULT false;

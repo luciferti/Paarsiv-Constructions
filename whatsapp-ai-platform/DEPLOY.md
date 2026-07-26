@@ -44,14 +44,42 @@ Set in production:
 
 ## Connecting a real WhatsApp number (Meta Cloud API)
 
-1. In Meta Business, onboard the number to your app; note the
-   **Phone Number ID** and create a **System User token**.
-2. Point the app's webhook to `https://<api-host>/api/webhook`,
-   verify token = the tenant's `verifyToken`.
-3. In the platform: AI Control → Configuration (or PATCH `/api/settings`) set
-   `phoneNumberId`, `whatsappToken`, `verifyToken`.
-4. Inbound messages now hit the webhook (visible in Settings → Webhook logs);
-   outbound switches from simulated to real sends automatically.
+Connecting is done in the app under **Settings → WhatsApp**. No tokens are
+copied by hand — Meta's Embedded Signup window handles the login, the business
+selection and number verification, and the server does the rest.
+
+### One-time: your Meta app
+
+Create an app once at developers.facebook.com (type **Business**, product
+**WhatsApp**), then:
+
+1. **App settings → Basic** — copy the App ID and App Secret.
+2. **Facebook Login for Business** — create a configuration with login variation
+   *WhatsApp Embedded Signup* and copy its **Configuration ID**. The permissions
+   it requests must include `whatsapp_business_management`,
+   `whatsapp_business_messaging` and `business_management`.
+3. **App settings → Basic → App Domains** and Facebook Login → *Valid OAuth
+   redirect URIs* — add the domain the platform is served from.
+4. **WhatsApp → Configuration** — set the callback URL and verify token shown on
+   the Settings → WhatsApp screen, and subscribe to the `messages` field.
+5. Paste the App ID, App Secret and Configuration ID into Settings → WhatsApp.
+
+These can also be supplied server-wide via `META_APP_ID`, `META_APP_SECRET` and
+`META_CONFIG_ID`; a tenant's own values win over them.
+
+`PUBLIC_URL` must be the public origin of the API — it's what the screen shows
+as the callback URL. A localhost address will never receive a webhook.
+
+### Every connection after that
+
+Press **Connect with Facebook**. The server then exchanges the code for a
+business token, discovers the WhatsApp Business Account, subscribes this server
+to its webhooks and registers the number for the Cloud API — each step reported
+on screen, and any Meta error shown with its code, hint and `fbtrace_id`.
+
+Once connected, sending stops being simulated, and **delivered / read counts
+come from Meta's status webhooks** rather than being estimated. Use **Re-check**
+to re-run the live checks and **Repair** if the webhook subscription is lost.
 
 ## Local development
 

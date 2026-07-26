@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { handleInbound, type InboundMessage } from "../services/inbound";
+import { handleStatuses } from "../services/deliveryStatus";
 
 export const webhookRouter = Router();
 
@@ -76,6 +77,12 @@ webhookRouter.post("/", async (req, res) => {
             type: m.type || "text",
           };
           await handleInbound(tenant, inbound);
+        }
+
+        // Delivery receipts for messages we sent — this is where a live
+        // campaign's delivered/read numbers actually come from.
+        if (value.statuses?.length) {
+          await handleStatuses(tenant.id, value.statuses);
         }
       }
     }

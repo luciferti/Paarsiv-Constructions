@@ -60,6 +60,23 @@ model Tenant {
   whatsappToken  String?  // Meta system-user token
   verifyToken    String?
   graphVersion   String   @default("v21.0")
+  // Meta app used for Embedded Signup (one-time setup, then one-click connect)
+  metaAppId      String?
+  metaAppSecret  String?
+  metaConfigId   String?  // Facebook Login for Business configuration id
+  // Snapshot of what Meta tells us about the connection, refreshed on demand
+  businessId           String?
+  businessName         String?
+  businessVerification String?  // verified | not_verified | pending
+  wabaName             String?
+  wabaReviewStatus     String?  // APPROVED | PENDING | REJECTED
+  displayPhoneNumber   String?
+  verifiedName         String?
+  qualityRating        String?  // GREEN | YELLOW | RED
+  messagingLimit       String?  // e.g. TIER_1K
+  webhookSubscribed    Boolean  @default(false)
+  connectedAt          DateTime?
+  connectionError      String?
   // AI engine config
   aiSource       AiSource @default(OWN)
   aiEnabled      Boolean  @default(true)
@@ -468,8 +485,11 @@ model CampaignRecipient {
   status     String   @default("QUEUED") // QUEUED | SENT | DELIVERED | READ | FAILED
   error      String?
   sentAt     DateTime?
+  // Meta's message id — how delivered/read webhooks find this row again.
+  waMessageId String?
 
   @@index([campaignId])
+  @@index([waMessageId])
 }
 
 // ---------------- Journey (linear automation flow) ----------------
