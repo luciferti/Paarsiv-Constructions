@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Search, User as UserIcon, Send, PhoneCall, MapPin, Tag as TagIcon,
-  CircleDot, Loader2, Sparkles, Smile, Meh, Frown,
+  CircleDot, Loader2, Sparkles, Smile, Meh, Frown, Zap, StickyNote, Plus, X,
 } from "lucide-react";
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
 import { connectSocket, getSocket } from "@/lib/socket";
-import type { Contact, ContactField, Conversation, Message } from "@/lib/types";
+import type { Contact, ContactField, Conversation, Message, Note, QuickReply } from "@/lib/types";
 
 type Filter = "all" | "unread" | "ai" | "human";
 
@@ -50,6 +50,12 @@ export default function InboxPage() {
   const [assist, setAssist] = useState<Assist | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
 
+  // notes + quick replies
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [qrOpen, setQrOpen] = useState(false);
+
   const active = conversations.find((c) => c.id === activeId) || null;
 
   const loadConversations = useCallback(() => {
@@ -62,6 +68,7 @@ export default function InboxPage() {
   useEffect(loadConversations, [loadConversations]);
   useEffect(() => {
     api.get<{ fields: ContactField[] }>("/contact-fields").then((r) => setFields(r.fields)).catch(() => {});
+    api.get<{ replies: QuickReply[] }>("/quick-replies").then((r) => setQuickReplies(r.replies)).catch(() => {});
   }, []);
 
   // Realtime: conversation list updates
@@ -103,11 +110,38 @@ export default function InboxPage() {
     if (!activeId) return;
     let alive = true;
     setAssist(null); // reset copilot for the new thread
+    setQrOpen(false);
     api.get<{ messages: Message[] }>(`/conversations/${activeId}/messages`)
       .then((r) => alive && setMessages(r.messages))
       .catch(() => alive && setMessages([]));
+    api.get<{ notes: Note[] }>(`/conversations/${activeId}/notes`)
+      .then((r) => alive && setNotes(r.notes))
+      .catch(() => alive && setNotes([]));
     return () => { alive = false; };
   }, [activeId]);
+
+  async function addNote() {
+    if (!activeId || !noteDraft.trim()) return;
+    const r = await api.post<{ note: Note }>(`/conversations/${activeId}/notes`, { body: noteDraft.trim() });
+    setNotes((prev) => [r.note, ...prev]);
+    setNoteDraft("");
+  }
+
+  async function addLabel() {
+    if (!active) return;
+    const l = prompt("Label (e.g. hot-lead, follow-up):");
+    if (!l?.trim()) return;
+    const labels = [...(active.labels || []), l.trim()];
+    const r = await api.patch<{ conversation: Conversation }>(`/conversations/${active.id}/labels`, { labels });
+    setConversations((prev) => prev.map((c) => (c.id === active.id ? { ...c, ...r.conversation } : c)));
+  }
+
+  async function removeLabel(label: string) {
+    if (!active) return;
+    const labels = (active.labels || []).filter((x) => x !== label);
+    const r = await api.patch<{ conversation: Conversation }>(`/conversations/${active.id}/labels`, { labels });
+    setConversations((prev) => prev.map((c) => (c.id === active.id ? { ...c, ...r.conversation } : c)));
+  }
 
   async function analyze() {
     if (!activeId || analyzing) return;
@@ -258,8 +292,17 @@ export default function InboxPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold truncate">{active.customerName || active.phone}</div>
-                <div className="text-xs text-muted-foreground">
-                  +{active.phone} · {active.mode === "AI" ? "AI auto-reply" : "Human handling"}
+                <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                  <span>+{active.phone} · {active.mode === "AI" ? "AI auto-reply" : "Human handling"}</span>
+                  {(active.labels || []).map((l) => (
+                    <span key={l} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-px rounded-full bg-accent text-accent-foreground font-medium group">
+                      {l}
+                      <X className="w-2.5 h-2.5 cursor-pointer opacity-60 hover:opacity-100" onClick={() => removeLabel(l)} />
+                    </span>
+                  ))}
+                  <button onClick={addLabel} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-px rounded-full border text-muted-foreground hover:text-primary hover:border-primary">
+                    <Plus className="w-2.5 h-2.5" />label
+                  </button>
                 </div>
               </div>
               <button
@@ -302,7 +345,30 @@ export default function InboxPage() {
               )}
             </div>
 
-            <div className="shrink-0 border-t bg-card p-3 flex items-end gap-2">
+            <div className="shrink-0 border-t bg-card p-3 flex items-end gap-2 relative">
+              {qrOpen && (
+                <div className="absolute bottom-full left-3 mb-2 w-80 rounded-xl border bg-card shadow-lg overflow-hidden z-10">
+                  <div className="px-3 py-2 border-b text-xs font-semibold text-muted-foreground">Quick replies</div>
+                  {quickReplies.map((q) => (
+                    <button
+                      key={q.id}
+                      onClick={() => { setDraft(q.body); setQrOpen(false); }}
+                      className="w-full text-left px-3 py-2 hover:bg-muted border-b border-border/50 last:border-0"
+                    >
+                      <div className="text-xs font-semibold">{q.title}</div>
+                      <div className="text-xs text-muted-foreground truncate">{q.body}</div>
+                    </button>
+                  ))}
+                  {quickReplies.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">No quick replies yet.</p>}
+                </div>
+              )}
+              <button
+                onClick={() => setQrOpen((o) => !o)}
+                title="Quick replies"
+                className={clsx("h-10 w-10 rounded-xl border grid place-items-center", qrOpen ? "bg-accent text-accent-foreground border-primary" : "text-muted-foreground hover:bg-muted")}
+              >
+                <Zap className="w-4 h-4" />
+              </button>
               <textarea
                 rows={1}
                 value={draft}
@@ -395,6 +461,36 @@ export default function InboxPage() {
                   </button>
                 </div>
               )}
+            </div>
+
+            {/* Internal notes */}
+            <div className="rounded-xl border p-3">
+              <div className="flex items-center gap-1.5 mb-2">
+                <StickyNote className="w-3.5 h-3.5 text-warning" />
+                <span className="text-xs font-semibold">Internal notes</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">not sent to customer</span>
+              </div>
+              <div className="flex gap-1.5 mb-2">
+                <input
+                  className="flex-1 h-8 px-2.5 rounded-lg border bg-background text-xs outline-none focus:ring-2 focus:ring-ring"
+                  placeholder="Add a note…"
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addNote(); }}
+                />
+                <button onClick={addNote} disabled={!noteDraft.trim()} className="h-8 px-2.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50">Add</button>
+              </div>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                {notes.map((n) => (
+                  <div key={n.id} className="rounded-lg bg-warning/10 border border-warning/20 px-2.5 py-1.5">
+                    <div className="text-xs">{n.body}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      {n.authorName || "someone"} · {new Date(n.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+                {notes.length === 0 && <p className="text-[11px] text-muted-foreground">No notes yet.</p>}
+              </div>
             </div>
 
             <div>

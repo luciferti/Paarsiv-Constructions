@@ -182,11 +182,13 @@ model Conversation {
   unreadCount    Int       @default(0)
   status         String    @default("open") // open | closed
   mode           ConvMode  @default(AI)
+  labels         String[]  @default([])
   assignedUserId String?
   assignedUser   User?     @relation("Assigned", fields: [assignedUserId], references: [id])
   createdAt      DateTime  @default(now())
 
   messages       Message[]
+  notes          Note[]
 
   @@unique([tenantId, phone])
   @@index([tenantId, assignedUserId])
@@ -209,6 +211,30 @@ model Message {
   timestamp      DateTime  @default(now())
 
   @@index([tenantId, conversationId, timestamp])
+}
+
+// ---------------- Note (internal, never sent to the customer) ----------------
+model Note {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       String?
+  authorName     String?
+  body           String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+// ---------------- QuickReply (canned agent responses) ----------------
+model QuickReply {
+  id        String   @id @default(cuid())
+  tenantId  String
+  title     String
+  body      String
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, title])
 }
 
 // ---------------- Knowledge (rule-bot + LLM grounding) ----------------

@@ -209,6 +209,21 @@ async function main() {
   });
   console.log("journeys: 1 (New enquiry welcome)");
 
+  // ---- Quick replies ----
+  const quickReplies = [
+    { title: "Greeting", body: "Hi! Thanks for reaching out to Demo Realty. How can I help you today?" },
+    { title: "Site visit", body: "I can arrange a free site visit for you. Which day works best — weekday or weekend?" },
+    { title: "Loan help", body: "We work with leading banks for home loans up to 80% of property value. Want a callback from our loan desk?" },
+  ];
+  for (const q of quickReplies) {
+    await prisma.quickReply.upsert({
+      where: { tenantId_title: { tenantId: tenant.id, title: q.title } },
+      update: { body: q.body },
+      create: { tenantId: tenant.id, ...q },
+    });
+  }
+  console.log(`quick replies: ${quickReplies.length}`);
+
   console.log("\nDone. Login at tenant 'demo':");
   console.log(`  admin / ${ADMIN_PW}`);
   console.log(`  priya, arjun, sana, neha, vikram, rohit / ${AGENT_PW}`);

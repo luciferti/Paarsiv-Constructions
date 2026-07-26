@@ -112,6 +112,51 @@ conversationsRouter.post("/:id/handback", async (req, res) => {
   res.json({ conversation: updated });
 });
 
+/** PATCH /conversations/:id/labels — replace the label set. */
+const labelsSchema = z.object({ labels: z.array(z.string().min(1)).max(20) });
+conversationsRouter.patch("/:id/labels", async (req, res) => {
+  const parsed = labelsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "labels[] required" });
+  const conv = await loadVisible(req.auth!, req.params.id);
+  if (!conv) return res.status(404).json({ error: "not found" });
+  const updated = await prisma.conversation.update({
+    where: { id: conv.id },
+    data: { labels: parsed.data.labels.map((l) => l.trim()).filter(Boolean) },
+    include: { assignedUser: { select: { id: true, displayName: true } } },
+  });
+  emitRealtime({ tenantId: conv.tenantId, type: "conversation", conversation: updated });
+  res.json({ conversation: updated });
+});
+
+/** GET /conversations/:id/notes — internal notes (never sent to customer). */
+conversationsRouter.get("/:id/notes", async (req, res) => {
+  const conv = await loadVisible(req.auth!, req.params.id);
+  if (!conv) return res.status(404).json({ error: "not found" });
+  const notes = await prisma.note.findMany({
+    where: { conversationId: conv.id },
+    orderBy: { createdAt: "desc" },
+  });
+  res.json({ notes });
+});
+
+/** POST /conversations/:id/notes — add an internal note. */
+const noteSchema = z.object({ body: z.string().min(1) });
+conversationsRouter.post("/:id/notes", async (req, res) => {
+  const parsed = noteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "body required" });
+  const conv = await loadVisible(req.auth!, req.params.id);
+  if (!conv) return res.status(404).json({ error: "not found" });
+  const note = await prisma.note.create({
+    data: {
+      conversationId: conv.id,
+      authorId: req.auth!.uid,
+      authorName: req.auth!.username,
+      body: parsed.data.body,
+    },
+  });
+  res.status(201).json({ note });
+});
+
 /** POST /conversations/:id/assign — reassign (admin/RM within scope). */
 const assignSchema = z.object({ userId: z.string().nullable() });
 conversationsRouter.post("/:id/assign", async (req, res) => {

@@ -8,8 +8,22 @@ export interface Conversation {
   unreadCount: number;
   status: string;
   mode: "AI" | "HUMAN";
+  labels?: string[];
   assignedUserId?: string | null;
   assignedUser?: { id: string; displayName: string } | null;
+}
+
+export interface Note {
+  id: string;
+  authorName?: string | null;
+  body: string;
+  createdAt: string;
+}
+
+export interface QuickReply {
+  id: string;
+  title: string;
+  body: string;
 }
 
 export interface Message {

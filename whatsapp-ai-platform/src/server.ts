@@ -19,6 +19,7 @@ import { settingsRouter } from "./routes/settings";
 import { usersRouter } from "./routes/users";
 import { apiKeysRouter } from "./routes/apiKeys";
 import { aiAssistRouter } from "./routes/aiAssist";
+import { quickRepliesRouter } from "./routes/quickReplies";
 import { logsRouter } from "./routes/logs";
 import { contactsRouter } from "./routes/contacts";
 import { contactFieldsRouter } from "./routes/contactFields";
@@ -96,6 +97,7 @@ app.use("/api/reports", reportsRouter); // analytics
 app.use("/api/api-keys", apiKeysRouter); // programmatic access (admin)
 app.use("/api/logs", logsRouter); // audit + webhook logs (admin)
 app.use("/api/ai", aiAssistRouter); // copilot: summary/sentiment/suggestions
+app.use("/api/quick-replies", quickRepliesRouter); // canned agent responses
 app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec as object)); // API docs
 app.use("/uploads", express.static(UPLOAD_DIR)); // serve uploaded media
 
