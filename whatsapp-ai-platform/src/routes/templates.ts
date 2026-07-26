@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { extractTokens } from "../lib/tokens";
+import { deleteOnMeta, submitToMeta, syncFromMeta } from "../services/metaTemplates";
 
 export const templatesRouter = Router();
 templatesRouter.use(requireAuth);
@@ -32,17 +33,53 @@ const templateSchema = z.object({
   folderId: z.string().nullable().optional(),
 });
 
-function shape(t: any) {
-  return { ...t, tokens: extractTokens(t.body || "") };
+function shape(t: any, assetUrls?: Map<string, string>) {
+  return {
+    ...t,
+    tokens: extractTokens(t.body || ""),
+    headerAssetUrl: t.headerAssetId ? assetUrls?.get(t.headerAssetId) ?? null : null,
+  };
 }
 
-/** GET /templates — list with the tokens each body uses. */
+/** Resolve /uploads URLs for header + carousel-card assets in one query. */
+async function assetUrlMap(tenantId: string, templates: { headerAssetId: string | null; cards: unknown }[]) {
+  const ids = new Set<string>();
+  for (const t of templates) {
+    if (t.headerAssetId) ids.add(t.headerAssetId);
+    for (const c of (t.cards as { assetId?: string }[]) || []) if (c?.assetId) ids.add(c.assetId);
+  }
+  if (ids.size === 0) return new Map<string, string>();
+  const assets = await prisma.asset.findMany({
+    where: { tenantId, id: { in: Array.from(ids) } },
+    select: { id: true, url: true },
+  });
+  return new Map(assets.map((a) => [a.id, a.url]));
+}
+
+/** GET /templates — list with tokens, Meta status and resolved media URLs. */
 templatesRouter.get("/", async (req, res) => {
   const templates = await prisma.template.findMany({
     where: { tenantId: req.auth!.tenantId },
     orderBy: { createdAt: "desc" },
   });
-  res.json({ templates: templates.map(shape) });
+  const urls = await assetUrlMap(req.auth!.tenantId, templates);
+  res.json({
+    templates: templates.map((t) => ({
+      ...shape(t, urls),
+      cards: ((t.cards as { assetId?: string; body?: string }[]) || []).map((c) => ({
+        ...c,
+        assetUrl: c?.assetId ? urls.get(c.assetId) ?? null : null,
+      })),
+    })),
+  });
+});
+
+/** POST /templates/sync — pull live statuses from Meta (admin/RM). */
+templatesRouter.post("/sync", requireRole("ADMIN", "RM"), async (req, res) => {
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.auth!.tenantId } });
+  if (!tenant) return res.status(404).json({ error: "tenant missing" });
+  const result = await syncFromMeta(tenant);
+  res.json(result);
 });
 
 function toData(d: z.infer<typeof templateSchema>) {
@@ -62,7 +99,11 @@ function toData(d: z.infer<typeof templateSchema>) {
   };
 }
 
-/** POST /templates — create (admin/RM). Demo: auto-APPROVED. */
+/**
+ * POST /templates — create locally and submit to Meta for approval.
+ * Without WhatsApp credentials the template stays local (status LOCAL) so the
+ * platform is still usable before a number is connected.
+ */
 templatesRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
   const parsed = templateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -71,10 +112,36 @@ templatesRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
   });
   if (exists) return res.status(409).json({ error: "template name taken" });
 
-  const template = await prisma.template.create({
-    data: { tenantId: req.auth!.tenantId, status: "APPROVED", ...toData(parsed.data) },
+  let template = await prisma.template.create({
+    data: { tenantId: req.auth!.tenantId, status: "DRAFT", ...toData(parsed.data) },
   });
-  res.status(201).json({ template: shape(template) });
+
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.auth!.tenantId } });
+  const submit = tenant ? await submitToMeta(tenant, template) : { ok: false, skipped: true, error: "tenant missing" };
+
+  template = await prisma.template.update({
+    where: { id: template.id },
+    data: submit.ok
+      ? {
+          status: "PENDING",
+          metaId: submit.metaId ?? null,
+          metaStatus: submit.status ?? "PENDING",
+          metaCategory: submit.category ?? null,
+          metaError: null,
+          syncedAt: new Date(),
+        }
+      : {
+          status: submit.skipped ? "LOCAL" : "DRAFT",
+          metaStatus: submit.skipped ? null : "SUBMIT_FAILED",
+          metaError: submit.error ?? null,
+        },
+  });
+
+  const urls = await assetUrlMap(req.auth!.tenantId, [template]);
+  res.status(201).json({
+    template: shape(template, urls),
+    meta: { submitted: submit.ok, skipped: !!submit.skipped, error: submit.error ?? null },
+  });
 });
 
 /** PATCH /templates/:id — edit (admin/RM). */
@@ -97,9 +164,14 @@ templatesRouter.patch("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const updated = await prisma.template.update({
     where: { id: t.id },
-    data: toData(parsed.data),
+    data: {
+      ...toData(parsed.data),
+      // Meta keeps the previously approved version until it is resubmitted.
+      metaError: t.metaId ? "Edited locally — resubmit to Meta to update the approved version" : t.metaError,
+    },
   });
-  res.json({ template: shape(updated) });
+  const urls = await assetUrlMap(req.auth!.tenantId, [updated]);
+  res.json({ template: shape(updated, urls) });
 });
 
 /** DELETE /templates/:id (admin/RM). */
@@ -108,6 +180,8 @@ templatesRouter.delete("/:id", requireRole("ADMIN", "RM"), async (req, res) => {
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
   });
   if (!t) return res.status(404).json({ error: "not found" });
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.auth!.tenantId } });
+  if (tenant) await deleteOnMeta(tenant, t); // best effort, before the local row goes
   await prisma.template.delete({ where: { id: t.id } });
   res.json({ ok: true });
 });

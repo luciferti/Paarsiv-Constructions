@@ -380,6 +380,12 @@ model Template {
   buttons       Json     @default("[]")          // [{ type: "quick_reply"|"url"|"phone", text, value? }]
   cards         Json     @default("[]")          // carousel: [{ assetId, body, buttons: [] }]
   status        String   @default("APPROVED")    // DRAFT | PENDING | APPROVED | REJECTED
+  // ---- Meta (WhatsApp Cloud API) sync ----
+  metaId        String?                          // template id returned by Meta
+  metaStatus    String?                          // APPROVED | PENDING | REJECTED | PAUSED | DISABLED
+  metaCategory  String?                          // category Meta assigned
+  metaError     String?                          // rejection/submit reason
+  syncedAt      DateTime?                        // last time status was pulled
   folderId      String?
   folder        TemplateFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
   createdAt     DateTime @default(now())

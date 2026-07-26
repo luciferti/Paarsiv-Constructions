@@ -86,6 +86,7 @@ export interface TemplateButton {
 }
 export interface TemplateCard {
   assetId?: string;
+  assetUrl?: string | null;
   body: string;
   buttons?: TemplateButton[];
 }
@@ -103,6 +104,12 @@ export interface Template {
   buttons: TemplateButton[];
   cards: TemplateCard[];
   status: string;
+  metaId?: string | null;
+  metaStatus?: string | null;
+  metaCategory?: string | null;
+  metaError?: string | null;
+  syncedAt?: string | null;
+  headerAssetUrl?: string | null;
   folderId?: string | null;
   tokens: string[];
   createdAt: string;
