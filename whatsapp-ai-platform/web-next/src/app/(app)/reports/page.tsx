@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Bot, CheckCheck, ChevronRight, Eye, MessageSquare, Send as SendIcon,
-  Timer, TrendingUp, Users, UsersRound,
+  Bot, ChevronRight, Eye, LayoutDashboard, Megaphone, MessageSquare,
+  Send as SendIcon, Timer, TrendingUp, Users, UsersRound,
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart,
@@ -37,8 +37,17 @@ interface Breakdown {
   total: number;
 }
 
-const SLICE = ["hsl(var(--primary))", "hsl(var(--success))", "hsl(var(--warning))", "#7f77dd", "#d4537e", "#378add"];
+type Section = "overview" | "campaigns" | "messaging" | "audience" | "agents";
 
+const SECTIONS: { v: Section; label: string; desc: string; icon: React.ElementType }[] = [
+  { v: "overview", label: "Overview", desc: "Headline numbers", icon: LayoutDashboard },
+  { v: "campaigns", label: "Campaigns", desc: "Delivery and reads", icon: Megaphone },
+  { v: "messaging", label: "Messaging", desc: "Volume and response", icon: MessageSquare },
+  { v: "audience", label: "Audience", desc: "Growth and segments", icon: Users },
+  { v: "agents", label: "Agents", desc: "Team performance", icon: UsersRound },
+];
+
+const SLICE = ["hsl(var(--primary))", "hsl(var(--success))", "hsl(var(--warning))", "#7f77dd", "#d4537e", "#378add"];
 const axis = { fontSize: 11, fill: "hsl(var(--muted-foreground))" };
 const tooltipStyle = {
   background: "hsl(var(--card))",
@@ -70,13 +79,27 @@ function Kpi({ icon: Icon, label, value, sub, tone }: {
   );
 }
 
+function Card({ title, subtitle, children, className }: {
+  title: string; subtitle?: string; children: React.ReactNode; className?: string;
+}) {
+  return (
+    <div className={clsx("rounded-xl border bg-card p-5 shadow-card", className)}>
+      <h2 className="text-[15px] font-semibold">{title}</h2>
+      {subtitle && <p className="text-xs text-muted-foreground mt-0.5 mb-4">{subtitle}</p>}
+      {children}
+    </div>
+  );
+}
+
 export default function ReportsPage() {
   const router = useRouter();
+  const [section, setSection] = useState<Section>("overview");
+  const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
+
   const [data, setData] = useState<ReportOverview | null>(null);
   const [agents, setAgents] = useState<AgentReport | null>(null);
   const [series, setSeries] = useState<SeriesPoint[]>([]);
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null);
-  const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
   const [campaigns, setCampaigns] = useState<(CampaignSummary & { readRate: number })[]>([]);
   const [campMeta, setCampMeta] = useState<PageMeta>(EMPTY_PAGE);
   const [campPage, setCampPage] = useState(1);
@@ -112,266 +135,333 @@ export default function ReportsPage() {
     { stage: "Failed", value: t.failed },
   ];
   const topAgents = [...(agents?.agents || [])].sort((a, b) => b.replies - a.replies).slice(0, 6);
+  const current = SECTIONS.find((s) => s.v === section)!;
+
+  const activityChart = (
+    <ResponsiveContainer width="100%" height={280}>
+      <AreaChart data={series} margin={{ left: -18, right: 8 }}>
+        <defs>
+          <linearGradient id="gIn" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.02} />
+          </linearGradient>
+          <linearGradient id="gAi" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="hsl(var(--success))" stopOpacity={0.3} />
+            <stop offset="100%" stopColor="hsl(var(--success))" stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+        <XAxis dataKey="date" tickFormatter={shortDay} tick={axis} axisLine={false} tickLine={false} minTickGap={24} />
+        <YAxis tick={axis} axisLine={false} tickLine={false} allowDecimals={false} width={40} />
+        <Tooltip contentStyle={tooltipStyle} />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Area type="monotone" dataKey="incoming" name="Customer" stroke="hsl(var(--primary))" fill="url(#gIn)" strokeWidth={2} />
+        <Area type="monotone" dataKey="ai" name="AI" stroke="hsl(var(--success))" fill="url(#gAi)" strokeWidth={2} />
+        <Area type="monotone" dataKey="agent" name="Agent" stroke="hsl(var(--warning))" fill="transparent" strokeWidth={2} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+
+  const funnelChart = (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={funnel} layout="vertical" margin={{ left: 8, right: 16 }}>
+        <XAxis type="number" hide />
+        <YAxis type="category" dataKey="stage" width={76} tick={axis} axisLine={false} tickLine={false} />
+        <Tooltip cursor={{ fill: "hsl(var(--muted))" }} contentStyle={tooltipStyle} />
+        <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={26}>
+          {funnel.map((f, i) => (
+            <Cell key={f.stage} fill={i === 3 ? "hsl(var(--destructive))" : i === 1 ? "hsl(var(--success))" : "hsl(var(--primary))"} fillOpacity={i === 2 ? 0.6 : 1} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+
+  const campaignTable = (
+    <div className="rounded-xl border bg-card shadow-card overflow-hidden">
+      <div className="px-6 py-4 border-b">
+        <h2 className="text-[15px] font-semibold">Campaign performance</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">{campMeta.total} campaigns · click one to open its full report</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] text-muted-foreground uppercase tracking-wide border-b bg-muted/40">
+              <th className="px-6 py-3 font-medium">Campaign</th>
+              <th className="px-3 py-3 font-medium">Status</th>
+              <th className="px-3 py-3 font-medium text-right">Audience</th>
+              <th className="px-3 py-3 font-medium text-right">Sent</th>
+              <th className="px-3 py-3 font-medium text-right">Delivered</th>
+              <th className="px-3 py-3 font-medium text-right">Read</th>
+              <th className="px-3 py-3 font-medium text-right">Failed</th>
+              <th className="px-3 py-3 font-medium w-32">Read rate</th>
+              <th className="px-3 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {campaigns.map((c) => (
+              <tr key={c.id} onClick={() => router.push(`/campaigns/${c.id}`)}
+                className="border-b last:border-0 hover:bg-muted/40 cursor-pointer">
+                <td className="px-6 py-3 font-medium">{c.name}</td>
+                <td className="px-3 py-3">
+                  <span className={clsx("text-[11px] px-2 py-0.5 rounded-full font-medium",
+                    c.status === "SENT" ? "bg-accent text-accent-foreground" :
+                    c.status === "FAILED" ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground")}>
+                    {c.status.toLowerCase()}
+                  </span>
+                </td>
+                <td className="px-3 py-3 text-right">{c.totalCount}</td>
+                <td className="px-3 py-3 text-right">{c.sentCount}</td>
+                <td className="px-3 py-3 text-right">{c.deliveredCount}</td>
+                <td className="px-3 py-3 text-right">{c.readCount}</td>
+                <td className="px-3 py-3 text-right">{c.failedCount}</td>
+                <td className="px-3 py-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${c.readRate}%` }} />
+                    </div>
+                    <span className="text-xs font-semibold w-8 text-right">{c.readRate}%</span>
+                  </div>
+                </td>
+                <td className="px-3 py-3 text-muted-foreground"><ChevronRight className="w-4 h-4" /></td>
+              </tr>
+            ))}
+            {campaigns.length === 0 && (
+              <tr><td colSpan={9} className="px-6 py-6 text-muted-foreground">No campaigns in this period.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-6 py-3 border-t">
+        <Pagination meta={campMeta} label="campaigns" onPage={setCampPage} />
+      </div>
+    </div>
+  );
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="px-8 py-6 border-b bg-card/50 flex items-center gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">Reports</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Messaging activity, campaign performance and team output</p>
+    <div className="flex-1 flex min-h-0">
+      {/* section rail */}
+      <aside className="w-60 shrink-0 border-r bg-card p-2.5 overflow-y-auto">
+        <div className="px-3 pt-1 pb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Reports
         </div>
-        <div className="flex-1" />
-        <DateRangeFilter value={range} onChange={setRange} />
-      </div>
-
-      <div className="p-8 space-y-6 max-w-6xl">
-        {/* KPI row */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <Kpi icon={MessageSquare} label="Messages" value={totalMessages} sub="in + out" tone="text-primary" />
-          <Kpi icon={Users} label="Contacts" value={data.audience.contacts} sub={`${data.audience.optedIn} opted in`} />
-          <Kpi icon={Bot} label="AI replies" value={data.inbox.aiReplies} sub={`${data.inbox.agentReplies} by agents`} tone="text-primary" />
-          <Kpi icon={Timer} label="Avg response" value={fmtDuration(agents?.avgFirstResponseSec ?? null)} sub="first reply" tone="text-warning" />
-          <Kpi icon={Eye} label="Read rate" value={`${data.campaigns.readRate}%`} sub={`${data.campaigns.count} campaigns`} tone="text-success" />
+        <div className="space-y-0.5">
+          {SECTIONS.map((s) => {
+            const Icon = s.icon;
+            const on = section === s.v;
+            return (
+              <button
+                key={s.v}
+                onClick={() => setSection(s.v)}
+                className={clsx(
+                  "w-full flex items-start gap-2.5 px-3 py-2 rounded-lg text-left transition-colors",
+                  on ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted"
+                )}
+              >
+                <Icon className={clsx("w-4 h-4 mt-0.5 shrink-0", on && "text-primary")} />
+                <span className="min-w-0">
+                  <span className={clsx("block text-[13px] font-medium", on ? "text-accent-foreground" : "text-foreground")}>{s.label}</span>
+                  <span className="block text-[10px] text-muted-foreground truncate">{s.desc}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
+      </aside>
 
-        {/* activity over time */}
-        <div className="rounded-xl border bg-card p-5 shadow-card">
-          <div className="flex items-center gap-2 mb-1">
-            <TrendingUp className="w-4 h-4 text-muted-foreground" />
-            <h2 className="text-[15px] font-semibold">Message activity</h2>
+      {/* main */}
+      <section className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
+        <div className="px-8 py-5 border-b bg-card/50 flex items-center gap-3">
+          <div>
+            <h1 className="text-xl font-semibold">{current.label}</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">{current.desc}</p>
           </div>
-          <p className="text-xs text-muted-foreground mb-4">Daily inbound vs AI vs agent messages</p>
-          <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={series} margin={{ left: -18, right: 8 }}>
-              <defs>
-                <linearGradient id="gIn" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.02} />
-                </linearGradient>
-                <linearGradient id="gAi" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--success))" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="hsl(var(--success))" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-              <XAxis dataKey="date" tickFormatter={shortDay} tick={axis} axisLine={false} tickLine={false} minTickGap={24} />
-              <YAxis tick={axis} axisLine={false} tickLine={false} allowDecimals={false} width={40} />
-              <Tooltip contentStyle={tooltipStyle} labelFormatter={(l) => `Date ${l}`} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Area type="monotone" dataKey="incoming" name="Customer" stroke="hsl(var(--primary))" fill="url(#gIn)" strokeWidth={2} />
-              <Area type="monotone" dataKey="ai" name="AI" stroke="hsl(var(--success))" fill="url(#gAi)" strokeWidth={2} />
-              <Area type="monotone" dataKey="agent" name="Agent" stroke="hsl(var(--warning))" fill="transparent" strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
+          <div className="flex-1" />
+          <DateRangeFilter value={range} onChange={setRange} />
         </div>
 
-        {/* funnel + growth */}
-        <div className="grid lg:grid-cols-2 gap-4">
-          <div className="rounded-xl border bg-card p-5 shadow-card">
-            <div className="flex items-center gap-2 mb-1">
-              <CheckCheck className="w-4 h-4 text-muted-foreground" />
-              <h2 className="text-[15px] font-semibold">Campaign funnel</h2>
-            </div>
-            <p className="text-xs text-muted-foreground mb-4">
-              Delivery {data.campaigns.deliveryRate}% · read {data.campaigns.readRate}%
-            </p>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={funnel} layout="vertical" margin={{ left: 8, right: 16 }}>
-                <XAxis type="number" hide />
-                <YAxis type="category" dataKey="stage" width={76} tick={axis} axisLine={false} tickLine={false} />
-                <Tooltip cursor={{ fill: "hsl(var(--muted))" }} contentStyle={tooltipStyle} />
-                <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={26}>
-                  {funnel.map((f, i) => (
-                    <Cell key={f.stage} fill={i === 3 ? "hsl(var(--destructive))" : i === 1 ? "hsl(var(--success))" : "hsl(var(--primary))"} fillOpacity={i === 2 ? 0.6 : 1} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        <div className="flex-1 overflow-y-auto p-8 space-y-5 max-w-6xl">
+          {section === "overview" && (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                <Kpi icon={MessageSquare} label="Messages" value={totalMessages} sub="in + out" tone="text-primary" />
+                <Kpi icon={Users} label="Contacts" value={data.audience.contacts} sub={`${data.audience.optedIn} opted in`} />
+                <Kpi icon={Bot} label="AI replies" value={data.inbox.aiReplies} sub={`${data.inbox.agentReplies} by agents`} tone="text-primary" />
+                <Kpi icon={Timer} label="Avg response" value={fmtDuration(agents?.avgFirstResponseSec ?? null)} sub="first reply" tone="text-warning" />
+                <Kpi icon={Eye} label="Read rate" value={`${data.campaigns.readRate}%`} sub={`${data.campaigns.count} campaigns`} tone="text-success" />
+              </div>
+              <Card title="Message activity" subtitle="Daily customer, AI and agent messages">{activityChart}</Card>
+              <div className="grid lg:grid-cols-2 gap-4">
+                <Card title="Campaign funnel" subtitle={`Delivery ${data.campaigns.deliveryRate}% · read ${data.campaigns.readRate}%`}>{funnelChart}</Card>
+                <Card title="Audience growth" subtitle="New contacts and conversations per day">
+                  <ResponsiveContainer width="100%" height={220}>
+                    <LineChart data={series} margin={{ left: -18, right: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                      <XAxis dataKey="date" tickFormatter={shortDay} tick={axis} axisLine={false} tickLine={false} minTickGap={24} />
+                      <YAxis tick={axis} axisLine={false} tickLine={false} allowDecimals={false} width={40} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Line type="monotone" dataKey="contacts" name="New contacts" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="conversations" name="Conversations" stroke="hsl(var(--warning))" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Card>
+              </div>
+            </>
+          )}
 
-          <div className="rounded-xl border bg-card p-5 shadow-card">
-            <div className="flex items-center gap-2 mb-1">
-              <Users className="w-4 h-4 text-muted-foreground" />
-              <h2 className="text-[15px] font-semibold">Audience growth</h2>
-            </div>
-            <p className="text-xs text-muted-foreground mb-4">New contacts and conversations per day</p>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={series} margin={{ left: -18, right: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis dataKey="date" tickFormatter={shortDay} tick={axis} axisLine={false} tickLine={false} minTickGap={24} />
-                <YAxis tick={axis} axisLine={false} tickLine={false} allowDecimals={false} width={40} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Line type="monotone" dataKey="contacts" name="New contacts" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="conversations" name="Conversations" stroke="hsl(var(--warning))" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+          {section === "campaigns" && (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <Kpi icon={SendIcon} label="Sent" value={t.sent} tone="text-primary" />
+                <Kpi icon={Eye} label="Delivered" value={t.delivered} sub={`${data.campaigns.deliveryRate}% of sent`} tone="text-success" />
+                <Kpi icon={Eye} label="Read" value={t.read} sub={`${data.campaigns.readRate}% of sent`} tone="text-primary" />
+                <Kpi icon={Megaphone} label="Campaigns" value={campMeta.total} sub="in this period" />
+              </div>
+              <Card title="Delivery funnel" subtitle="Across every campaign in this period">{funnelChart}</Card>
+              {campaignTable}
+            </>
+          )}
 
-        {/* audience breakdown */}
-        {breakdown && breakdown.total > 0 && (
-          <div className="grid lg:grid-cols-3 gap-4">
-            <div className="rounded-xl border bg-card p-5 shadow-card">
-              <h2 className="text-[15px] font-semibold">Top cities</h2>
-              <p className="text-xs text-muted-foreground mb-3">Where contacts are from</p>
-              <ResponsiveContainer width="100%" height={190}>
-                <BarChart data={breakdown.cities} margin={{ left: -22, right: 8 }}>
-                  <XAxis dataKey="name" tick={axis} axisLine={false} tickLine={false} />
-                  <YAxis tick={axis} axisLine={false} tickLine={false} allowDecimals={false} width={36} />
-                  <Tooltip cursor={{ fill: "hsl(var(--muted))" }} contentStyle={tooltipStyle} />
-                  <Bar dataKey="value" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} barSize={26} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="rounded-xl border bg-card p-5 shadow-card">
-              <h2 className="text-[15px] font-semibold">Tags</h2>
-              <p className="text-xs text-muted-foreground mb-3">Most used contact tags</p>
-              {breakdown.tags.length ? (
-                <ResponsiveContainer width="100%" height={190}>
-                  <PieChart>
-                    <Pie data={breakdown.tags} dataKey="value" nameKey="name" innerRadius={40} outerRadius={66} paddingAngle={2}>
-                      {breakdown.tags.map((_, i) => <Cell key={i} fill={SLICE[i % SLICE.length]} />)}
-                    </Pie>
-                    <Legend wrapperStyle={{ fontSize: 10 }} />
-                    <Tooltip contentStyle={tooltipStyle} />
-                  </PieChart>
+          {section === "messaging" && (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <Kpi icon={MessageSquare} label="Total messages" value={totalMessages} tone="text-primary" />
+                <Kpi icon={Bot} label="AI replies" value={data.inbox.aiReplies} tone="text-success" />
+                <Kpi icon={SendIcon} label="Agent replies" value={data.inbox.agentReplies} tone="text-warning" />
+                <Kpi icon={Timer} label="Avg first response" value={fmtDuration(agents?.avgFirstResponseSec ?? null)} sub={`${agents?.conversationsMeasured ?? 0} conversations`} />
+              </div>
+              <Card title="Message activity" subtitle="Who is doing the talking, day by day">{activityChart}</Card>
+              <Card title="Conversations started" subtitle="New threads opened per day">
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={series} margin={{ left: -18, right: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="date" tickFormatter={shortDay} tick={axis} axisLine={false} tickLine={false} minTickGap={24} />
+                    <YAxis tick={axis} axisLine={false} tickLine={false} allowDecimals={false} width={40} />
+                    <Tooltip cursor={{ fill: "hsl(var(--muted))" }} contentStyle={tooltipStyle} />
+                    <Bar dataKey="conversations" name="Conversations" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} barSize={22} />
+                  </BarChart>
                 </ResponsiveContainer>
-              ) : <p className="text-sm text-muted-foreground">No tags yet.</p>}
-            </div>
+              </Card>
+            </>
+          )}
 
-            <div className="rounded-xl border bg-card p-5 shadow-card">
-              <h2 className="text-[15px] font-semibold">How they arrived</h2>
-              <p className="text-xs text-muted-foreground mb-3">Contact source</p>
-              <ResponsiveContainer width="100%" height={190}>
-                <PieChart>
-                  <Pie data={breakdown.sources} dataKey="value" nameKey="name" innerRadius={40} outerRadius={66} paddingAngle={2}>
-                    {breakdown.sources.map((_, i) => <Cell key={i} fill={SLICE[(i + 2) % SLICE.length]} />)}
-                  </Pie>
-                  <Legend wrapperStyle={{ fontSize: 10 }} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
+          {section === "audience" && breakdown && (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <Kpi icon={Users} label="Contacts" value={data.audience.contacts} tone="text-primary" />
+                <Kpi icon={Users} label="Opted in" value={data.audience.optedIn} sub="can receive campaigns" tone="text-success" />
+                <Kpi icon={MessageSquare} label="Conversations" value={data.inbox.conversations} />
+                <Kpi icon={TrendingUp} label="New in period" value={breakdown.total} sub="contacts added" tone="text-warning" />
+              </div>
+              <Card title="Audience growth" subtitle="New contacts and conversations per day">
+                <ResponsiveContainer width="100%" height={240}>
+                  <LineChart data={series} margin={{ left: -18, right: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="date" tickFormatter={shortDay} tick={axis} axisLine={false} tickLine={false} minTickGap={24} />
+                    <YAxis tick={axis} axisLine={false} tickLine={false} allowDecimals={false} width={40} />
+                    <Tooltip contentStyle={tooltipStyle} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="contacts" name="New contacts" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="conversations" name="Conversations" stroke="hsl(var(--warning))" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Card>
+              <div className="grid lg:grid-cols-3 gap-4">
+                <Card title="Top cities" subtitle="Where contacts are from">
+                  <ResponsiveContainer width="100%" height={190}>
+                    <BarChart data={breakdown.cities} margin={{ left: -22, right: 8 }}>
+                      <XAxis dataKey="name" tick={axis} axisLine={false} tickLine={false} />
+                      <YAxis tick={axis} axisLine={false} tickLine={false} allowDecimals={false} width={36} />
+                      <Tooltip cursor={{ fill: "hsl(var(--muted))" }} contentStyle={tooltipStyle} />
+                      <Bar dataKey="value" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} barSize={26} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Card>
+                <Card title="Tags" subtitle="Most used contact tags">
+                  {breakdown.tags.length ? (
+                    <ResponsiveContainer width="100%" height={190}>
+                      <PieChart>
+                        <Pie data={breakdown.tags} dataKey="value" nameKey="name" innerRadius={40} outerRadius={66} paddingAngle={2}>
+                          {breakdown.tags.map((_, i) => <Cell key={i} fill={SLICE[i % SLICE.length]} />)}
+                        </Pie>
+                        <Legend wrapperStyle={{ fontSize: 10 }} />
+                        <Tooltip contentStyle={tooltipStyle} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : <p className="text-sm text-muted-foreground">No tags yet.</p>}
+                </Card>
+                <Card title="How they arrived" subtitle="Contact source">
+                  <ResponsiveContainer width="100%" height={190}>
+                    <PieChart>
+                      <Pie data={breakdown.sources} dataKey="value" nameKey="name" innerRadius={40} outerRadius={66} paddingAngle={2}>
+                        {breakdown.sources.map((_, i) => <Cell key={i} fill={SLICE[(i + 2) % SLICE.length]} />)}
+                      </Pie>
+                      <Legend wrapperStyle={{ fontSize: 10 }} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Card>
+              </div>
+            </>
+          )}
 
-        {/* campaign-level table */}
-        <div className="rounded-xl border bg-card shadow-card overflow-hidden">
-          <div className="px-6 py-4 border-b">
-            <h2 className="text-[15px] font-semibold">Campaign performance</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{campMeta.total} campaigns · click one to open its full report</p>
-          </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[11px] text-muted-foreground uppercase tracking-wide border-b bg-muted/40">
-                <th className="px-6 py-3 font-medium">Campaign</th>
-                <th className="px-3 py-3 font-medium">Status</th>
-                <th className="px-3 py-3 font-medium text-right">Audience</th>
-                <th className="px-3 py-3 font-medium text-right">Sent</th>
-                <th className="px-3 py-3 font-medium text-right">Delivered</th>
-                <th className="px-3 py-3 font-medium text-right">Read</th>
-                <th className="px-3 py-3 font-medium text-right">Failed</th>
-                <th className="px-3 py-3 font-medium w-32">Read rate</th>
-                <th className="px-3 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {campaigns.map((c) => (
-                <tr key={c.id} onClick={() => router.push(`/campaigns/${c.id}`)}
-                  className="border-b last:border-0 hover:bg-muted/40 cursor-pointer">
-                  <td className="px-6 py-3 font-medium">{c.name}</td>
-                  <td className="px-3 py-3">
-                    <span className={clsx("text-[11px] px-2 py-0.5 rounded-full font-medium",
-                      c.status === "SENT" ? "bg-accent text-accent-foreground" :
-                      c.status === "FAILED" ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground")}>
-                      {c.status.toLowerCase()}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 text-right">{c.totalCount}</td>
-                  <td className="px-3 py-3 text-right">{c.sentCount}</td>
-                  <td className="px-3 py-3 text-right">{c.deliveredCount}</td>
-                  <td className="px-3 py-3 text-right">{c.readCount}</td>
-                  <td className="px-3 py-3 text-right">{c.failedCount}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full rounded-full bg-primary" style={{ width: `${c.readRate}%` }} />
-                      </div>
-                      <span className="text-xs font-semibold w-8 text-right">{c.readRate}%</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 text-muted-foreground"><ChevronRight className="w-4 h-4" /></td>
-                </tr>
-              ))}
-              {campaigns.length === 0 && (
-                <tr><td colSpan={9} className="px-6 py-6 text-muted-foreground">No campaigns in this period.</td></tr>
+          {section === "agents" && agents && (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <Kpi icon={UsersRound} label="Agents" value={agents.agents.length} />
+                <Kpi icon={SendIcon} label="Agent replies" value={data.inbox.agentReplies} tone="text-primary" />
+                <Kpi icon={Bot} label="AI replies" value={data.inbox.aiReplies} sub="handled without a human" tone="text-success" />
+                <Kpi icon={Timer} label="Avg first response" value={fmtDuration(agents.avgFirstResponseSec)} sub={`${agents.conversationsMeasured} conversations`} tone="text-warning" />
+              </div>
+              {topAgents.length > 0 && (
+                <Card title="Who is replying" subtitle="Agent replies in this period">
+                  <ResponsiveContainer width="100%" height={230}>
+                    <BarChart data={topAgents} layout="vertical" margin={{ left: 8, right: 16 }}>
+                      <XAxis type="number" hide allowDecimals={false} />
+                      <YAxis type="category" dataKey="displayName" width={120} tick={axis} axisLine={false} tickLine={false} />
+                      <Tooltip cursor={{ fill: "hsl(var(--muted))" }} contentStyle={tooltipStyle} />
+                      <Bar dataKey="replies" name="Replies" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} barSize={18} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Card>
               )}
-            </tbody>
-          </table>
-          <div className="px-6 py-3 border-t">
-            <Pagination meta={campMeta} label="campaigns" onPage={setCampPage} />
-          </div>
-        </div>
-
-        {/* agent leaderboard */}
-        {agents && topAgents.length > 0 && (
-          <div className="grid lg:grid-cols-2 gap-4">
-            <div className="rounded-xl border bg-card p-5 shadow-card">
-              <div className="flex items-center gap-2 mb-1">
-                <UsersRound className="w-4 h-4 text-muted-foreground" />
-                <h2 className="text-[15px] font-semibold">Agent replies</h2>
-              </div>
-              <p className="text-xs text-muted-foreground mb-4">Who is answering customers</p>
-              <ResponsiveContainer width="100%" height={210}>
-                <BarChart data={topAgents} layout="vertical" margin={{ left: 8, right: 16 }}>
-                  <XAxis type="number" hide allowDecimals={false} />
-                  <YAxis type="category" dataKey="displayName" width={110} tick={axis} axisLine={false} tickLine={false} />
-                  <Tooltip cursor={{ fill: "hsl(var(--muted))" }} contentStyle={tooltipStyle} />
-                  <Bar dataKey="replies" name="Replies" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} barSize={18} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="rounded-xl border bg-card shadow-card overflow-hidden">
-              <div className="px-5 py-4 border-b flex items-center gap-3">
-                <div>
+              <div className="rounded-xl border bg-card shadow-card overflow-hidden">
+                <div className="px-5 py-4 border-b">
                   <h2 className="text-[15px] font-semibold">Team</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Replies and assigned conversations</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Replies, assigned conversations and last activity</p>
                 </div>
-                <div className="flex-1" />
-                <div className="text-right">
-                  <div className="text-lg font-semibold flex items-center gap-1.5 justify-end">
-                    <Timer className="w-4 h-4 text-primary" />{fmtDuration(agents.avgFirstResponseSec)}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">avg first response</div>
-                </div>
-              </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-[11px] text-muted-foreground uppercase tracking-wide border-b bg-muted/40">
-                    <th className="px-5 py-2.5 font-medium">Agent</th>
-                    <th className="px-3 py-2.5 font-medium">Role</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Replies</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Assigned</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agents.agents.map((a) => (
-                    <tr key={a.id} className="border-b last:border-0">
-                      <td className="px-5 py-2.5 font-medium">{a.displayName}</td>
-                      <td className="px-3 py-2.5 text-muted-foreground">{a.role}</td>
-                      <td className="px-3 py-2.5 text-right font-semibold">{a.replies}</td>
-                      <td className="px-3 py-2.5 text-right">{a.assignedConversations}</td>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] text-muted-foreground uppercase tracking-wide border-b bg-muted/40">
+                      <th className="px-5 py-2.5 font-medium">Agent</th>
+                      <th className="px-3 py-2.5 font-medium">Role</th>
+                      <th className="px-3 py-2.5 font-medium">Team</th>
+                      <th className="px-3 py-2.5 font-medium text-right">Replies</th>
+                      <th className="px-3 py-2.5 font-medium text-right">Assigned</th>
+                      <th className="px-3 py-2.5 font-medium">Last active</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
+                  </thead>
+                  <tbody>
+                    {agents.agents.map((a) => (
+                      <tr key={a.id} className="border-b last:border-0">
+                        <td className="px-5 py-2.5 font-medium">{a.displayName}</td>
+                        <td className="px-3 py-2.5 text-muted-foreground">{a.role}</td>
+                        <td className="px-3 py-2.5 text-muted-foreground">{a.team || "—"}</td>
+                        <td className="px-3 py-2.5 text-right font-semibold">{a.replies}</td>
+                        <td className="px-3 py-2.5 text-right">{a.assignedConversations}</td>
+                        <td className="px-3 py-2.5 text-muted-foreground text-xs">
+                          {a.lastActive ? new Date(a.lastActive).toLocaleString() : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
