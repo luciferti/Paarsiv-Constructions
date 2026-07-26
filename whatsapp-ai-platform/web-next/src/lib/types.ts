@@ -42,6 +42,13 @@ export interface Contact {
   name?: string | null;
   email?: string | null;
   city?: string | null;
+  company?: string | null;
+  jobTitle?: string | null;
+  country?: string | null;
+  timezone?: string | null;
+  language?: string | null;
+  externalId?: string | null;
+  status?: string;
   tags: string[];
   attributes?: Record<string, string> | null;
   optedIn: boolean;

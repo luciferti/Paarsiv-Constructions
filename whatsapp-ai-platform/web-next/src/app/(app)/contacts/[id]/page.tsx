@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Archive, Ban, Bot, Briefcase, Building2, CheckCheck, CircleCheck,
   Clock, Globe, Languages, Loader2, Mail, MapPin, MessageSquare, Pencil,
-  PhoneCall, Send, Sparkles, StickyNote, Tag as TagIcon, Timer, User as UserIcon, X,
+  PhoneCall, Send, Sparkles, StickyNote, Tag as TagIcon, Timer, User as UserIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
@@ -104,8 +104,6 @@ export default function Contact360Page() {
   const [assist, setAssist] = useState<Assist | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState<Record<string, string>>({});
 
   const load = useCallback(() => {
     api.get<C360>(`/contacts/${id}/360`).then(setData).catch(() => {});
@@ -127,25 +125,6 @@ export default function Contact360Page() {
     if (!data?.conversation || !noteDraft.trim()) return;
     await api.post(`/conversations/${data.conversation.id}/notes`, { body: noteDraft.trim() });
     setNoteDraft("");
-    load();
-  }
-  function openEdit() {
-    if (!data) return;
-    const c = data.contact;
-    setForm({
-      name: c.name || "", email: c.email || "", company: c.company || "",
-      jobTitle: c.jobTitle || "", city: c.city || "", country: c.country || "",
-      timezone: c.timezone || "", language: c.language || "", externalId: c.externalId || "",
-      tags: (c.tags || []).join(", "),
-    });
-    setEditing(true);
-  }
-  async function saveEdit() {
-    await api.patch(`/contacts/${id}`, {
-      ...form,
-      tags: form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-    });
-    setEditing(false);
     load();
   }
 
@@ -194,7 +173,7 @@ export default function Contact360Page() {
                 <MessageSquare className="w-3 h-3 inline mr-1" />Open chat
               </button>
             )}
-            {canEdit && <button className={btnGhost} onClick={openEdit}><Pencil className="w-3 h-3 inline mr-1" />Edit</button>}
+            {canEdit && <button className={btnGhost} onClick={() => router.push(`/contacts/${id}/edit`)}><Pencil className="w-3 h-3 inline mr-1" />Edit</button>}
             {canEdit && c.status !== "blocked" && (
               <button className={btnGhost} onClick={() => setStatus("blocked")}><Ban className="w-3 h-3 inline mr-1" />Block</button>
             )}
@@ -427,32 +406,6 @@ export default function Contact360Page() {
         </div>
       </aside>
 
-      {/* Edit drawer */}
-      {editing && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={() => setEditing(false)}>
-          <div className="w-[400px] max-w-[92vw] h-full bg-card border-l flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b flex items-center justify-between">
-              <span className="font-semibold">Edit contact</span>
-              <button onClick={() => setEditing(false)} className="p-1.5 rounded-md hover:bg-muted"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-3 text-sm">
-              {([["name", "Name"], ["email", "Email"], ["company", "Company"], ["jobTitle", "Job title"],
-                ["city", "City"], ["country", "Country"], ["timezone", "Timezone"], ["language", "Language"],
-                ["externalId", "External CRM ID"], ["tags", "Tags (comma separated)"]] as const).map(([key, label]) => (
-                <div key={key}>
-                  <label className="text-xs text-muted-foreground">{label}</label>
-                  <input className={clsx(inputCls, "mt-1")} value={form[key] || ""} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
-                </div>
-              ))}
-            </div>
-            <div className="px-5 py-3.5 border-t flex items-center gap-2">
-              <div className="flex-1" />
-              <button className={btnGhost} onClick={() => setEditing(false)}>Cancel</button>
-              <button className={btnPri} onClick={saveEdit}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
