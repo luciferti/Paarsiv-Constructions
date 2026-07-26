@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
+import { parseRange, dateFilter } from "../lib/dateRange";
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAuth);
@@ -12,6 +13,7 @@ reportsRouter.use(requireAuth);
  */
 reportsRouter.get("/agents", async (req, res) => {
   const tenantId = req.auth!.tenantId;
+  const range = dateFilter(parseRange(req));
 
   const users = await prisma.user.findMany({
     where: { tenantId, isActive: true },
@@ -22,13 +24,13 @@ reportsRouter.get("/agents", async (req, res) => {
   const [replyCounts, assignedCounts] = await Promise.all([
     prisma.message.groupBy({
       by: ["senderId"],
-      where: { tenantId, sentBy: "AGENT", senderId: { not: null } },
+      where: { tenantId, sentBy: "AGENT", senderId: { not: null }, ...(range ? { timestamp: range } : {}) },
       _count: { _all: true },
       _max: { timestamp: true },
     }),
     prisma.conversation.groupBy({
       by: ["assignedUserId"],
-      where: { tenantId, assignedUserId: { not: null } },
+      where: { tenantId, assignedUserId: { not: null }, ...(range ? { lastMessageAt: range } : {}) },
       _count: { _all: true },
     }),
   ]);
@@ -37,7 +39,7 @@ reportsRouter.get("/agents", async (req, res) => {
 
   // Global average first-response time across conversations.
   const convs = await prisma.conversation.findMany({
-    where: { tenantId },
+    where: { tenantId, ...(range ? { lastMessageAt: range } : {}) },
     select: { id: true },
     take: 200,
   });
@@ -80,19 +82,22 @@ reportsRouter.get("/agents", async (req, res) => {
 /** GET /reports/overview — headline metrics + per-campaign performance. */
 reportsRouter.get("/overview", async (req, res) => {
   const tenantId = req.auth!.tenantId;
+  const range = dateFilter(parseRange(req));
+  const msgWhere = range ? { timestamp: range } : {};
+  const convWhere = range ? { lastMessageAt: range } : {};
 
   const [contacts, optedIn, conversations, campaigns, aiReplies, agentReplies] =
     await Promise.all([
-      prisma.contact.count({ where: { tenantId } }),
-      prisma.contact.count({ where: { tenantId, optedIn: true } }),
-      prisma.conversation.count({ where: { tenantId } }),
+      prisma.contact.count({ where: { tenantId, ...(range ? { createdAt: range } : {}) } }),
+      prisma.contact.count({ where: { tenantId, optedIn: true, ...(range ? { createdAt: range } : {}) } }),
+      prisma.conversation.count({ where: { tenantId, ...convWhere } }),
       prisma.campaign.findMany({
-        where: { tenantId },
+        where: { tenantId, ...(range ? { createdAt: range } : {}) },
         orderBy: { createdAt: "desc" },
         take: 50,
       }),
-      prisma.message.count({ where: { tenantId, sentBy: "AI" } }),
-      prisma.message.count({ where: { tenantId, sentBy: "AGENT" } }),
+      prisma.message.count({ where: { tenantId, sentBy: "AI", ...msgWhere } }),
+      prisma.message.count({ where: { tenantId, sentBy: "AGENT", ...msgWhere } }),
     ]);
 
   const totals = campaigns.reduce(

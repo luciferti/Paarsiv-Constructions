@@ -9,6 +9,7 @@ import {
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
 import type { Contact, ContactField, Folder, SegCondition, SegOp, Segment } from "@/lib/types";
+import DateRangeFilter, { rangeQuery, type DateRange } from "@/components/DateRangeFilter";
 
 const BASE_FIELDS: { v: string; label: string }[] = [
   { v: "city", label: "City" },
@@ -96,6 +97,7 @@ export default function ContactsPage() {
   const [activeSeg, setActiveSeg] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [view, setView] = useState<"contacts" | "segments">("contacts"); // main-area mode
+  const [range, setRange] = useState<DateRange>({ preset: "all" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState<DrawerKind>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -124,10 +126,10 @@ export default function ContactsPage() {
     const p = new URLSearchParams();
     if (search) p.set("search", search);
     if (activeSeg) p.set("segmentId", activeSeg);
-    api.get<{ contacts: Contact[]; total: number }>(`/contacts?${p.toString()}`)
+    api.get<{ contacts: Contact[]; total: number }>(`/contacts?${p.toString()}${rangeQuery(range)}`)
       .then((r) => { setContacts(r.contacts); setTotal(r.total); setSelected(new Set()); })
       .catch(() => {});
-  }, [search, activeSeg]);
+  }, [search, activeSeg, range]);
   const loadAll = useCallback(() => {
     api.get<{ total: number }>("/contacts").then((r) => setAllCount(r.total)).catch(() => {});
   }, []);
@@ -486,6 +488,7 @@ export default function ContactsPage() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search…" className={clsx(inputCls, "pl-9")} />
           </div>
           <div className="flex-1" />
+          <DateRangeFilter value={range} onChange={setRange} />
           {canEdit && <button className={btnGhost} onClick={openDupes}><GitMerge className="w-3 h-3 inline mr-1" />Find duplicates</button>}
           <button className={btnGhost} onClick={exportCsv}><Download className="w-3 h-3 inline mr-1" />Export</button>
           {canEdit && (

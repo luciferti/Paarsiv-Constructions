@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CalendarClock, Send, Trash2, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Send, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
-import type { CampaignSummary, Segment, Template } from "@/lib/types";
+import type { CampaignSummary } from "@/lib/types";
+import DateRangeFilter, { DEFAULT_RANGE, rangeQuery, type DateRange } from "@/components/DateRangeFilter";
 
 const inputCls = "w-full h-9 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-ring";
 const btnPri = "h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 disabled:opacity-50";
@@ -19,40 +21,18 @@ const STATUS_CLS: Record<string, string> = {
 };
 
 export default function CampaignsPage() {
+  const router = useRouter();
   const session = typeof window !== "undefined" ? getSession() : null;
   const canEdit = session?.user.role === "ADMIN" || session?.user.role === "RM";
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [segments, setSegments] = useState<Segment[]>([]);
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", templateId: "", segmentId: "", when: "now", scheduledAt: "" });
+  const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
 
   const load = useCallback(() => {
-    api.get<{ campaigns: CampaignSummary[] }>("/campaigns").then((r) => setCampaigns(r.campaigns)).catch(() => {});
-  }, []);
+    api.get<{ campaigns: CampaignSummary[] }>(`/campaigns?_${rangeQuery(range)}`).then((r) => setCampaigns(r.campaigns)).catch(() => {});
+  }, [range]);
   useEffect(() => {
     load();
-    api.get<{ templates: Template[] }>("/templates").then((r) => setTemplates(r.templates)).catch(() => {});
-    api.get<{ segments: Segment[] }>("/segments").then((r) => setSegments(r.segments)).catch(() => {});
   }, [load]);
-
-  const seg = segments.find((s) => s.id === form.segmentId);
-
-  async function create() {
-    if (!form.name.trim() || !form.templateId) return;
-    const body: Record<string, unknown> = {
-      name: form.name.trim(),
-      templateId: form.templateId,
-      segmentId: form.segmentId || null,
-    };
-    if (form.when === "later" && form.scheduledAt) {
-      body.scheduledAt = new Date(form.scheduledAt).toISOString();
-    }
-    await api.post("/campaigns", body);
-    setForm({ name: "", templateId: "", segmentId: "", when: "now", scheduledAt: "" });
-    setOpen(false);
-    load();
-  }
 
   async function send(id: string) {
     await api.post(`/campaigns/${id}/send`);
@@ -68,7 +48,8 @@ export default function CampaignsPage() {
           <p className="text-sm text-muted-foreground mt-0.5">Broadcast a template to a segment — now or on a schedule</p>
         </div>
         <div className="flex-1" />
-        {canEdit && <button className={btnPri} onClick={() => setOpen(true)}>+ New campaign</button>}
+        <DateRangeFilter value={range} onChange={setRange} className="mr-2" />
+        {canEdit && <button className={btnPri} onClick={() => router.push('/campaigns/new')}>+ New campaign</button>}
       </div>
 
       <div className="p-8 max-w-6xl">
@@ -123,72 +104,6 @@ export default function CampaignsPage() {
         </div>
       </div>
 
-      {open && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={() => setOpen(false)}>
-          <div className="w-[420px] max-w-[92vw] h-full bg-card border-l flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b flex items-center justify-between">
-              <span className="font-semibold">New campaign</span>
-              <button onClick={() => setOpen(false)} className="p-1.5 rounded-md hover:bg-muted"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-3 text-sm">
-              <div>
-                <label className="text-xs text-muted-foreground">Name</label>
-                <input className={clsx(inputCls, "mt-1")} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="August launch" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Template</label>
-                <select className={clsx(inputCls, "mt-1")} value={form.templateId} onChange={(e) => setForm({ ...form, templateId: e.target.value })}>
-                  <option value="">— pick template —</option>
-                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Audience</label>
-                <select className={clsx(inputCls, "mt-1")} value={form.segmentId} onChange={(e) => setForm({ ...form, segmentId: e.target.value })}>
-                  <option value="">All opted-in contacts</option>
-                  {segments.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.count})</option>)}
-                </select>
-                {seg && <p className="text-xs text-muted-foreground mt-1">{seg.count} contacts in this segment</p>}
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">When</label>
-                <div className="flex gap-1.5 mt-1">
-                  {(["now", "later"] as const).map((w) => (
-                    <button
-                      key={w}
-                      className={clsx(
-                        "flex-1 h-9 rounded-lg border text-xs font-medium",
-                        form.when === w ? "bg-accent text-accent-foreground border-primary" : "text-muted-foreground hover:bg-muted"
-                      )}
-                      onClick={() => setForm({ ...form, when: w })}
-                    >
-                      {w === "now" ? "Create draft (send manually)" : "Schedule"}
-                    </button>
-                  ))}
-                </div>
-                {form.when === "later" && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <CalendarClock className="w-4 h-4 text-muted-foreground" />
-                    <input
-                      type="datetime-local"
-                      className={inputCls}
-                      value={form.scheduledAt}
-                      onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="px-5 py-3.5 border-t flex items-center gap-2">
-              <div className="flex-1" />
-              <button className={btnGhost} onClick={() => setOpen(false)}>Cancel</button>
-              <button className={btnPri} disabled={!form.name.trim() || !form.templateId || (form.when === "later" && !form.scheduledAt)} onClick={create}>
-                {form.when === "later" ? "Schedule" : "Create"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

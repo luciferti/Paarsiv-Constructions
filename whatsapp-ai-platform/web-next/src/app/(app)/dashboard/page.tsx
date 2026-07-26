@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Users, MessageSquare, Bot, Megaphone, CheckCheck, Eye } from "lucide-react";
 import { api } from "@/lib/api";
+import DateRangeFilter, { DEFAULT_RANGE, rangeQuery, type DateRange } from "@/components/DateRangeFilter";
 
 interface Overview {
   audience: { contacts: number; optedIn: number };
@@ -47,10 +48,11 @@ function Bar({ label, value, max, cls }: { label: string; value: number; max: nu
 
 export default function DashboardPage() {
   const [data, setData] = useState<Overview | null>(null);
+  const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
 
   useEffect(() => {
-    api.get<Overview>("/reports/overview").then(setData).catch(() => {});
-  }, []);
+    api.get<Overview>(`/reports/overview?_${rangeQuery(range)}`).then(setData).catch(() => {});
+  }, [range]);
 
   if (!data) {
     return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
@@ -60,9 +62,13 @@ export default function DashboardPage() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="px-8 py-6 border-b bg-card/50">
-        <h1 className="text-xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Your workspace at a glance</p>
+      <div className="px-8 py-6 border-b bg-card/50 flex items-center gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Your workspace at a glance</p>
+        </div>
+        <div className="flex-1" />
+        <DateRangeFilter value={range} onChange={setRange} />
       </div>
 
       <div className="p-8 space-y-6 max-w-6xl">

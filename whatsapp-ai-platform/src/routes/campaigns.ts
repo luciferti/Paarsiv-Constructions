@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from "../middleware/auth";
 import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { runCampaign } from "../services/campaigns";
 import { audit } from "../lib/audit";
+import { parseRange, dateFilter } from "../lib/dateRange";
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -24,7 +25,10 @@ async function audienceCount(tenantId: string, segmentId: string | null): Promis
 /** GET /campaigns — list with template/segment names. */
 campaignsRouter.get("/", async (req, res) => {
   const [campaigns, templates, segments] = await Promise.all([
-    prisma.campaign.findMany({ where: { tenantId: req.auth!.tenantId }, orderBy: { createdAt: "desc" } }),
+    prisma.campaign.findMany({
+      where: { tenantId: req.auth!.tenantId, ...(dateFilter(parseRange(req)) ? { createdAt: dateFilter(parseRange(req)) } : {}) },
+      orderBy: { createdAt: "desc" },
+    }),
     prisma.template.findMany({ where: { tenantId: req.auth!.tenantId }, select: { id: true, name: true } }),
     prisma.segment.findMany({ where: { tenantId: req.auth!.tenantId }, select: { id: true, name: true } }),
   ]);

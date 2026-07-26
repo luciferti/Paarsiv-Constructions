@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from "../middleware/auth";
 import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { audit } from "../lib/audit";
 import { findDuplicates, mergeContacts, mergeRulesOf, pickSurvivor } from "../services/merge";
+import { parseRange, dateFilter } from "../lib/dateRange";
 
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
@@ -14,12 +15,17 @@ contactsRouter.get("/", async (req, res) => {
   const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
   const segmentId = typeof req.query.segmentId === "string" ? req.query.segmentId : "";
 
-  let where = { tenantId: req.auth!.tenantId } as any;
+  const created = dateFilter(parseRange(req));
+  let where = { tenantId: req.auth!.tenantId, ...(created ? { createdAt: created } : {}) } as any;
   if (segmentId) {
     const seg = await prisma.segment.findFirst({
       where: { id: segmentId, tenantId: req.auth!.tenantId },
     });
-    if (seg) where = segmentWhere(req.auth!.tenantId, seg.rules as unknown as SegmentRules);
+    if (seg) {
+      // Keep the date filter alongside the segment rules.
+      const segWhere = segmentWhere(req.auth!.tenantId, seg.rules as unknown as SegmentRules);
+      where = created ? { AND: [segWhere, { createdAt: created }] } : segWhere;
+    }
   }
   if (search) {
     where = {

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { X, CheckCheck, Eye, Send as SendIcon, AlertTriangle, ChevronRight, Timer, UsersRound } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
+import DateRangeFilter, { DEFAULT_RANGE, rangeQuery, type DateRange } from "@/components/DateRangeFilter";
 import type { CampaignRecipient, ReportOverview } from "@/lib/types";
 
 interface CampaignDetail {
@@ -62,11 +63,12 @@ export default function ReportsPage() {
   const [agents, setAgents] = useState<AgentReport | null>(null);
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
 
   useEffect(() => {
-    api.get<ReportOverview>("/reports/overview").then(setData).catch(() => {});
-    api.get<AgentReport>("/reports/agents").then(setAgents).catch(() => {});
-  }, []);
+    api.get<ReportOverview>(`/reports/overview?_${rangeQuery(range)}`).then(setData).catch(() => {});
+    api.get<AgentReport>(`/reports/agents?_${rangeQuery(range)}`).then(setAgents).catch(() => {});
+  }, [range]);
 
   async function openCampaign(id: string) {
     setLoadingDetail(true);
@@ -84,11 +86,15 @@ export default function ReportsPage() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="px-8 py-6 border-b bg-card/50">
-        <h1 className="text-xl font-semibold">Reports</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Delivery, reads and per-campaign performance
-        </p>
+      <div className="px-8 py-6 border-b bg-card/50 flex items-center gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">Reports</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Delivery, reads and per-campaign performance
+          </p>
+        </div>
+        <div className="flex-1" />
+        <DateRangeFilter value={range} onChange={setRange} />
       </div>
 
       <div className="p-8 space-y-6 max-w-6xl">
