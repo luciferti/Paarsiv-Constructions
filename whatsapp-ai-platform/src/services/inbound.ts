@@ -145,7 +145,8 @@ export async function sendReply(
   tenant: Tenant,
   conv: Conversation,
   text: string,
-  sentBy: "AI" | "AGENT"
+  sentBy: "AI" | "AGENT",
+  senderId?: string
 ) {
   const result = await sendWhatsAppText(tenant, conv.phone, text);
 
@@ -159,6 +160,7 @@ export async function sendReply(
       body: text,
       status: result.ok ? "SENT" : "FAILED",
       sentBy,
+      senderId: senderId ?? null,
     },
   });
 

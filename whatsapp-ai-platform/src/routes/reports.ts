@@ -5,6 +5,78 @@ import { requireAuth } from "../middleware/auth";
 export const reportsRouter = Router();
 reportsRouter.use(requireAuth);
 
+/**
+ * GET /reports/agents — per-agent performance + global first-response time.
+ * First response = gap between a conversation's first customer message and
+ * the first outbound (AI or agent) that follows it.
+ */
+reportsRouter.get("/agents", async (req, res) => {
+  const tenantId = req.auth!.tenantId;
+
+  const users = await prisma.user.findMany({
+    where: { tenantId, isActive: true },
+    select: { id: true, displayName: true, role: true, team: true, presence: true },
+    orderBy: [{ role: "asc" }, { displayName: "asc" }],
+  });
+
+  const [replyCounts, assignedCounts] = await Promise.all([
+    prisma.message.groupBy({
+      by: ["senderId"],
+      where: { tenantId, sentBy: "AGENT", senderId: { not: null } },
+      _count: { _all: true },
+      _max: { timestamp: true },
+    }),
+    prisma.conversation.groupBy({
+      by: ["assignedUserId"],
+      where: { tenantId, assignedUserId: { not: null } },
+      _count: { _all: true },
+    }),
+  ]);
+  const replies = new Map(replyCounts.map((r) => [r.senderId, r]));
+  const assigned = new Map(assignedCounts.map((a) => [a.assignedUserId, a._count._all]));
+
+  // Global average first-response time across conversations.
+  const convs = await prisma.conversation.findMany({
+    where: { tenantId },
+    select: { id: true },
+    take: 200,
+  });
+  let totalMs = 0;
+  let counted = 0;
+  for (const c of convs) {
+    const firstIn = await prisma.message.findFirst({
+      where: { conversationId: c.id, direction: "INBOUND" },
+      orderBy: { timestamp: "asc" },
+      select: { timestamp: true },
+    });
+    if (!firstIn) continue;
+    const firstOut = await prisma.message.findFirst({
+      where: { conversationId: c.id, direction: "OUTBOUND", timestamp: { gte: firstIn.timestamp } },
+      orderBy: { timestamp: "asc" },
+      select: { timestamp: true },
+    });
+    if (!firstOut) continue;
+    totalMs += firstOut.timestamp.getTime() - firstIn.timestamp.getTime();
+    counted++;
+  }
+  const avgFirstResponseSec = counted > 0 ? Math.round(totalMs / counted / 1000) : null;
+
+  res.json({
+    avgFirstResponseSec,
+    conversationsMeasured: counted,
+    agents: users.map((u) => ({
+      id: u.id,
+      displayName: u.displayName,
+      role: u.role,
+      team: u.team,
+      presence: u.presence,
+      replies: replies.get(u.id)?._count._all ?? 0,
+      lastActive: replies.get(u.id)?._max.timestamp ?? null,
+      assignedConversations: assigned.get(u.id) ?? 0,
+    })),
+  });
+});
+
 /** GET /reports/overview — headline metrics + per-campaign performance. */
 reportsRouter.get("/overview", async (req, res) => {
   const tenantId = req.auth!.tenantId;

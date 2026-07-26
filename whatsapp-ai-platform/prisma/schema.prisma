@@ -208,9 +208,11 @@ model Message {
   mediaUrl       String?
   status         MsgStatus @default(RECEIVED)
   sentBy         SentBy
+  senderId       String?   // User id when sentBy = AGENT (attribution)
   timestamp      DateTime  @default(now())
 
   @@index([tenantId, conversationId, timestamp])
+  @@index([tenantId, senderId])
 }
 
 // ---------------- Note (internal, never sent to the customer) ----------------

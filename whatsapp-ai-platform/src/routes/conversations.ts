@@ -84,7 +84,7 @@ conversationsRouter.post("/:id/reply", async (req, res) => {
     },
   });
 
-  const { sendResult } = await sendReply(tenant, owned, parsed.data.text, "AGENT");
+  const { sendResult } = await sendReply(tenant, owned, parsed.data.text, "AGENT", req.auth!.uid);
   res.json({ ok: sendResult.ok, error: sendResult.error });
 });
 

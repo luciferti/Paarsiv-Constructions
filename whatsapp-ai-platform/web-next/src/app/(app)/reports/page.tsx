@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, CheckCheck, Eye, Send as SendIcon, AlertTriangle, ChevronRight } from "lucide-react";
+import { X, CheckCheck, Eye, Send as SendIcon, AlertTriangle, ChevronRight, Timer, UsersRound } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import type { CampaignRecipient, ReportOverview } from "@/lib/types";
@@ -40,13 +40,32 @@ function Funnel({ label, value, max, cls }: { label: string; value: number; max:
   );
 }
 
+interface AgentReport {
+  avgFirstResponseSec: number | null;
+  conversationsMeasured: number;
+  agents: {
+    id: string; displayName: string; role: string; team?: string | null;
+    presence?: string; replies: number; lastActive?: string | null;
+    assignedConversations: number;
+  }[];
+}
+
+function fmtDuration(sec: number | null): string {
+  if (sec === null) return "—";
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m`;
+  return `${(sec / 3600).toFixed(1)}h`;
+}
+
 export default function ReportsPage() {
   const [data, setData] = useState<ReportOverview | null>(null);
+  const [agents, setAgents] = useState<AgentReport | null>(null);
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   useEffect(() => {
     api.get<ReportOverview>("/reports/overview").then(setData).catch(() => {});
+    api.get<AgentReport>("/reports/agents").then(setAgents).catch(() => {});
   }, []);
 
   async function openCampaign(id: string) {
@@ -143,6 +162,52 @@ export default function ReportsPage() {
             </tbody>
           </table>
         </div>
+        {/* Agent performance */}
+        {agents && (
+          <div className="rounded-xl border bg-card shadow-card overflow-hidden">
+            <div className="px-6 py-4 border-b flex items-center gap-3">
+              <div>
+                <h2 className="text-[15px] font-semibold flex items-center gap-2">
+                  <UsersRound className="w-4 h-4 text-muted-foreground" />Agent performance
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Replies are attributed per agent</p>
+              </div>
+              <div className="flex-1" />
+              <div className="text-right">
+                <div className="text-lg font-semibold flex items-center gap-1.5 justify-end">
+                  <Timer className="w-4 h-4 text-primary" />{fmtDuration(agents.avgFirstResponseSec)}
+                </div>
+                <div className="text-[11px] text-muted-foreground">avg first response · {agents.conversationsMeasured} convs</div>
+              </div>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] text-muted-foreground uppercase tracking-wide border-b bg-muted/40">
+                  <th className="px-6 py-3 font-medium">Agent</th>
+                  <th className="px-3 py-3 font-medium">Role</th>
+                  <th className="px-3 py-3 font-medium">Team</th>
+                  <th className="px-3 py-3 font-medium text-right">Replies</th>
+                  <th className="px-3 py-3 font-medium text-right">Assigned convs</th>
+                  <th className="px-3 py-3 font-medium">Last active</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agents.agents.map((a) => (
+                  <tr key={a.id} className="border-b last:border-0 hover:bg-muted/40">
+                    <td className="px-6 py-3 font-medium">{a.displayName}</td>
+                    <td className="px-3 py-3 text-muted-foreground">{a.role}</td>
+                    <td className="px-3 py-3 text-muted-foreground">{a.team || "—"}</td>
+                    <td className="px-3 py-3 text-right font-semibold">{a.replies}</td>
+                    <td className="px-3 py-3 text-right">{a.assignedConversations}</td>
+                    <td className="px-3 py-3 text-muted-foreground text-xs">
+                      {a.lastActive ? new Date(a.lastActive).toLocaleString() : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Campaign drill-down drawer */}
