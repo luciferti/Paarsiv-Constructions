@@ -1,0 +1,434 @@
+// WhatsApp AI Inbox — generic multi-tenant platform
+// Each Tenant = one client (e.g. Ceyone) with its own WhatsApp number, users,
+// AI config, knowledge and projects. Everything is scoped by tenantId.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  RM
+  SALES
+}
+
+enum AiSource {
+  OWN     // rule-based, ₹0
+  CLAUDE  // Claude Haiku
+  GPT     // GPT-4o-mini
+  OFF     // no auto-reply
+}
+
+enum Direction {
+  INBOUND
+  OUTBOUND
+}
+
+enum SentBy {
+  CUSTOMER
+  AI
+  AGENT
+}
+
+enum ConvMode {
+  AI
+  HUMAN
+}
+
+enum MsgStatus {
+  RECEIVED
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// ---------------- Tenant (client) ----------------
+model Tenant {
+  id             String   @id @default(cuid())
+  name           String
+  slug           String   @unique
+  // WhatsApp (Meta Cloud API)
+  wabaId         String?
+  phoneNumberId  String?
+  whatsappToken  String?  // Meta system-user token
+  verifyToken    String?
+  graphVersion   String   @default("v21.0")
+  // AI engine config
+  aiSource       AiSource @default(OWN)
+  aiEnabled      Boolean  @default(true)
+  botName        String   @default("Assistant")
+  claudeKey      String?
+  claudeModel    String   @default("claude-haiku-4-5")
+  openaiKey      String?
+  openaiModel    String   @default("gpt-4o-mini")
+  systemPrompt   String?  // optional override; else built from knowledge+projects
+  createdAt      DateTime @default(now())
+
+  users          User[]
+  conversations  Conversation[]
+  messages       Message[]
+  intents        Intent[]
+  projects       Project[]
+  contacts       Contact[]
+  contactFields  ContactField[]
+  segments        Segment[]
+  segmentFolders  SegmentFolder[]
+  templates       Template[]
+  templateFolders TemplateFolder[]
+  assets          Asset[]
+  assetFolders    AssetFolder[]
+  campaigns       Campaign[]
+  journeys        Journey[]
+  apiKeys         ApiKey[]
+  auditLogs       AuditLog[]
+}
+
+// ---------------- RefreshToken (rotating, hashed) ----------------
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------------- ApiKey (programmatic access, hashed, show-once) ----------------
+model ApiKey {
+  id         String    @id @default(cuid())
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name       String
+  prefix     String    // first chars shown in UI, e.g. wak_a1b2
+  keyHash    String    @unique
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId])
+}
+
+// ---------------- AuditLog ----------------
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String?
+  username  String?
+  action    String   // e.g. login, settings.update, campaign.send
+  entity    String?  // e.g. campaign, contact
+  entityId  String?
+  meta      Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+// ---------------- WebhookLog (inbound Meta events) ----------------
+model WebhookLog {
+  id            String   @id @default(cuid())
+  tenantId      String?
+  phoneNumberId String?
+  event         Json
+  status        String   @default("processed") // processed | ignored | error
+  error         String?
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+// ---------------- User (agent) — Admin / RM / Sales ----------------
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  username     String
+  passwordHash String
+  displayName  String
+  role         Role     @default(SALES)
+  managerId    String?  // parent (RM) for a SALES user; RM's manager is ADMIN
+  manager      User?    @relation("Manages", fields: [managerId], references: [id])
+  reports      User[]   @relation("Manages")
+  team         String?
+  presence     String   @default("offline")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  assigned     Conversation[] @relation("Assigned")
+
+  @@unique([tenantId, username])
+  @@index([tenantId, managerId])
+}
+
+// ---------------- Conversation ----------------
+model Conversation {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phone          String    // E.164 without '+'
+  customerName   String?
+  lastMessage    String?
+  lastMessageAt  DateTime  @default(now())
+  unreadCount    Int       @default(0)
+  status         String    @default("open") // open | closed
+  mode           ConvMode  @default(AI)
+  assignedUserId String?
+  assignedUser   User?     @relation("Assigned", fields: [assignedUserId], references: [id])
+  createdAt      DateTime  @default(now())
+
+  messages       Message[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId, assignedUserId])
+}
+
+// ---------------- Message ----------------
+model Message {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  waMessageId    String?   @unique  // Meta wamid — idempotency
+  direction      Direction
+  type           String    @default("text")
+  body           String
+  mediaUrl       String?
+  status         MsgStatus @default(RECEIVED)
+  sentBy         SentBy
+  timestamp      DateTime  @default(now())
+
+  @@index([tenantId, conversationId, timestamp])
+}
+
+// ---------------- Knowledge (rule-bot + LLM grounding) ----------------
+model Intent {
+  id         String  @id @default(cuid())
+  tenantId   String
+  tenant     Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  intentKey  String
+  keywords   String  // pipe-separated (English + Hinglish)
+  answer     String
+  isHandoff  Boolean @default(false)
+  priority   Int     @default(5)
+  isActive   Boolean @default(true)
+
+  @@unique([tenantId, intentKey])
+}
+
+// ---------------- Contact (audience for campaigns) ----------------
+// A person we can market to, independent of whether they've messaged us.
+// Inbound WhatsApp messages auto-create/enrich a Contact by phone.
+model Contact {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phone      String   // E.164 without '+'
+  name       String?
+  email      String?
+  city       String?
+  tags       String[] @default([])
+  attributes Json?    // free-form custom fields
+  optedIn    Boolean  @default(true) // WhatsApp marketing opt-in
+  source     String   @default("manual") // manual | inbound | import
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([tenantId, phone])
+  @@index([tenantId, city])
+}
+
+// ---------------- ContactField (tenant-defined custom field) ----------------
+// Values are stored per-contact in Contact.attributes keyed by `key`.
+model ContactField {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  key       String   // machine key, e.g. "budget"
+  label     String   // display name, e.g. "Budget"
+  type      String   @default("text") // text | number | date | boolean
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, key])
+}
+
+// ---------------- SegmentFolder (organizes segments) ----------------
+model SegmentFolder {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+
+  segments  Segment[]
+
+  @@unique([tenantId, name])
+}
+
+// ---------------- Segment (saved audience filter) ----------------
+// rules = { match: "all" | "any", conditions: [{ field, op, value }] }
+model Segment {
+  id         String         @id @default(cuid())
+  tenantId   String
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name       String
+  rules      Json
+  folderId   String?
+  folder     SegmentFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdAt  DateTime       @default(now())
+
+  @@unique([tenantId, name])
+  @@index([tenantId, folderId])
+}
+
+// ---------------- Projects (real inventory) ----------------
+model Project {
+  id         String  @id @default(cuid())
+  tenantId   String
+  tenant     Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name       String
+  city       String?
+  area       String?
+  propType   String?
+  config     String?
+  status     String?
+  priceText  String?
+  isActive   Boolean @default(true)
+
+  @@index([tenantId, city])
+}
+
+// ---------------- TemplateFolder ----------------
+model TemplateFolder {
+  id        String     @id @default(cuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime   @default(now())
+  templates Template[]
+
+  @@unique([tenantId, name])
+}
+
+// ---------------- Template (WhatsApp message template) ----------------
+// Body may contain named tokens like {{name}} / {{city}}, filled per contact.
+// type "standard" = header/body/footer/buttons; "carousel" = body + cards[].
+model Template {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  category      String   @default("MARKETING") // MARKETING | UTILITY | AUTHENTICATION
+  language      String   @default("en")
+  type          String   @default("standard")  // standard | carousel
+  headerType    String   @default("none")       // none | text | image | video | document
+  headerText    String?
+  headerAssetId String?                          // media header → an Asset
+  body          String
+  footerText    String?
+  buttons       Json     @default("[]")          // [{ type: "quick_reply"|"url"|"phone", text, value? }]
+  cards         Json     @default("[]")          // carousel: [{ assetId, body, buttons: [] }]
+  status        String   @default("APPROVED")    // DRAFT | PENDING | APPROVED | REJECTED
+  folderId      String?
+  folder        TemplateFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+
+  campaigns     Campaign[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, folderId])
+}
+
+// ---------------- AssetFolder ----------------
+model AssetFolder {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+  assets    Asset[]
+
+  @@unique([tenantId, name])
+}
+
+// ---------------- Asset (uploaded media / file) ----------------
+model Asset {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  filename     String   // stored filename on disk
+  originalName String
+  mimeType     String
+  size         Int
+  url          String   // public path, e.g. /uploads/<filename>
+  folderId     String?
+  folder       AssetFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, folderId])
+}
+
+// ---------------- Campaign (bulk broadcast to a segment) ----------------
+model Campaign {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String
+  templateId     String?
+  template       Template? @relation(fields: [templateId], references: [id])
+  segmentId      String?
+  status         String    @default("DRAFT") // DRAFT | SENDING | SENT | FAILED
+  scheduledAt    DateTime?
+  totalCount     Int       @default(0)
+  sentCount      Int       @default(0)
+  deliveredCount Int       @default(0)
+  readCount      Int       @default(0)
+  failedCount    Int       @default(0)
+  createdAt      DateTime  @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  recipients     CampaignRecipient[]
+
+  @@index([tenantId])
+}
+
+model CampaignRecipient {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contactId  String?
+  phone      String
+  name       String?
+  status     String   @default("QUEUED") // QUEUED | SENT | DELIVERED | READ | FAILED
+  error      String?
+  sentAt     DateTime?
+
+  @@index([campaignId])
+}
+
+// ---------------- Journey (linear automation flow) ----------------
+// steps = [{ type: "message", text|templateId }, { type: "wait", hours }]
+model Journey {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  status       String   @default("DRAFT") // DRAFT | ACTIVE
+  triggerType  String   @default("keyword") // keyword | new_contact
+  triggerValue String?  // keyword text when triggerType = keyword
+  steps        Json     @default("[]")
+  createdAt    DateTime @default(now())
+
+  @@unique([tenantId, name])
+}
