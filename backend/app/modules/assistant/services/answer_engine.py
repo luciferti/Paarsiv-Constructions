@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.modules.billing.services.billing_service import BillingService
 from app.modules.budget.services.budget_service import BudgetService
+from app.modules.document.services.document_service import DocumentService
 from app.modules.equipment.models.equipment_model import Equipment, EquipmentStatus
 from app.modules.expense.services.expense_service import ExpenseService
 from app.modules.invoice.models.invoice_model import Invoice, InvoiceStatus
@@ -161,6 +162,9 @@ class AssistantContext:
     def safety_summary(self):
         return SafetyService(self.db).summary(self.org_id)
 
+    def document_summary(self):
+        return DocumentService(self.db).summary(self.org_id)
+
     def work_orders(self) -> List[WorkOrder]:
         stmt = (
             select(WorkOrder)
@@ -278,6 +282,7 @@ _W = {
     "equipment": {"equipment", "machine", "machines", "machinery", "plant", "excavator", "jcb", "crane", "mixer", "vehicle", "vehicles", "gaadi", "machinery register"},
     "progress": {"progress", "milestone", "milestones", "completion", "percent complete", "how far", "kitna complete", "schedule", "kaam kitna", "kaam kitna hua", "kitna kaam"},
     "safety": {"safety", "incident", "incidents", "accident", "accidents", "near miss", "injury", "injuries", "hazard", "durghatna", "safety record"},
+    "document": {"document", "documents", "drawing", "drawings", "permit", "permits", "license", "licence", "contract", "contracts", "dastavej", "expiring", "expiry"},
     "create": {"bana", "banao", "banado", "create", "add kar", "upload kar", "kar do", "kar sakte", "skte ho", "sakte ho", "naya", "nayi", "new "},
 }
 
@@ -300,6 +305,7 @@ CREATE_GUIDES = [
     ("equipment", "equipment", "I can't create records myself — I only read your data. To add machinery: Equipment page → \"+ New Equipment\". To log usage: open a site → Equipment tab → Log Usage."),
     ("progress", "progress", "I can't create records myself — I only read your data. To track progress: open a site → Progress tab → add milestones and update their %."),
     ("safety", "safety", "I can't create records myself — I only read your data. To log a safety incident: Safety page → \"+ Report Incident\", pick the site, type and severity."),
+    ("document", "document", "I can't create records myself — I only read your data. To add a document: Documents page → \"+ Add Document\", paste the file link and set its category and expiry."),
 ]
 
 
@@ -324,6 +330,8 @@ class RuleBasedAnswerProvider(AnswerProvider):
         if _has(q, "summary") or (_has(q, "all") and len(domains) >= 2) or len(domains) >= 3:
             return self._org_summary(context)
 
+        if _has(q, "document"):
+            return self._answer_documents(context)
         if _has(q, "safety"):
             return self._answer_safety(context)
         if _has(q, "progress"):
@@ -458,6 +466,20 @@ class RuleBasedAnswerProvider(AnswerProvider):
         wages = context.labour_wage_total()
         tail = f"\n\nTotal wages recorded so far: ₹{_fmt(wages)}" if wages > 0 else ""
         return f"You have {len(workers)} worker(s), {len(active)} active:\n{listing}{tail}"
+
+    def _answer_documents(self, context: AssistantContext) -> str:
+        s = context.document_summary()
+        if s.total == 0:
+            return "No documents in the register yet. Add contracts, permits and drawings from the Documents page."
+        parts = [f"{s.total} document(s) on file."]
+        if s.by_category:
+            cats = ", ".join(f"{n} {name}" for name, n in s.by_category.items())
+            parts.append(f"By category: {cats}.")
+        if s.expiring_soon:
+            parts.append(f"⚠️ {s.expiring_soon} expiring within 30 days.")
+        if s.expired:
+            parts.append(f"⚠️ {s.expired} already expired.")
+        return " ".join(parts)
 
     def _answer_safety(self, context: AssistantContext) -> str:
         s = context.safety_summary()

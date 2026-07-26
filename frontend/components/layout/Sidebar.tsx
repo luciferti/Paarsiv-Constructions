@@ -18,6 +18,7 @@ const NAV_LINKS = [
   { label: "Work Orders", href: "/work-orders" },
   { label: "Equipment", href: "/equipment" },
   { label: "Safety", href: "/safety" },
+  { label: "Documents", href: "/documents" },
   { label: "Invoices", href: "/invoices" },
   { label: "Client Bills", href: "/client-bills" },
   { label: "Petty Cash", href: "/petty-cash" },
