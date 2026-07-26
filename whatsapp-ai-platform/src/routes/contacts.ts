@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { audit } from "../lib/audit";
+import { findDuplicates, mergeContacts, mergeRulesOf, pickSurvivor } from "../services/merge";
 
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
@@ -302,6 +303,43 @@ contactsRouter.get("/:id/360", async (req, res) => {
     inactiveDays: inactiveDays === 999 ? null : inactiveDays,
     fields,
   });
+});
+
+/** GET /contacts/duplicates — duplicate groups per the tenant's merge rules. */
+contactsRouter.get("/duplicates", requireRole("ADMIN", "RM"), async (req, res) => {
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.auth!.tenantId } });
+  if (!tenant) return res.status(404).json({ error: "tenant missing" });
+  const rules = mergeRulesOf(tenant.mergeRules);
+  const groups = await findDuplicates(req.auth!.tenantId, rules);
+  // Suggest a survivor per group so the UI can preselect it.
+  const withSuggestion = await Promise.all(
+    groups.map(async (g) => ({
+      ...g,
+      suggestedPrimaryId: (await pickSurvivor(req.auth!.tenantId, g.contacts, rules.survivor)).id,
+    }))
+  );
+  res.json({ rules, groups: withSuggestion });
+});
+
+/** POST /contacts/merge — merge duplicates into a chosen primary (admin/RM). */
+const mergeSchema = z.object({
+  primaryId: z.string().min(1),
+  duplicateIds: z.array(z.string().min(1)).min(1).max(20),
+});
+contactsRouter.post("/merge", requireRole("ADMIN", "RM"), async (req, res) => {
+  const parsed = mergeSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  try {
+    const result = await mergeContacts(req.auth!.tenantId, parsed.data.primaryId, parsed.data.duplicateIds);
+    audit(req, "contact.merge", {
+      entity: "contact",
+      entityId: parsed.data.primaryId,
+      meta: { absorbed: result.absorbed },
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : "merge failed" });
+  }
 });
 
 /** DELETE /contacts/:id (admin/RM). */

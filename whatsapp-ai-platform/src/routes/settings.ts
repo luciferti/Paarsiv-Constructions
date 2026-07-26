@@ -27,6 +27,7 @@ function maskTenant(t: any) {
     verifyToken: mask(t.verifyToken),
     claudeKey: mask(t.claudeKey),
     openaiKey: mask(t.openaiKey),
+    mergeRules: t.mergeRules ?? null,
   };
 }
 
@@ -57,6 +58,16 @@ const updateSchema = z.object({
   claudeModel: z.string().optional(),
   openaiModel: z.string().optional(),
   systemPrompt: z.string().nullable().optional(),
+  mergeRules: z
+    .object({
+      phoneSuffix: z.boolean(),
+      email: z.boolean(),
+      externalId: z.boolean(),
+      nameCity: z.boolean(),
+      customFields: z.array(z.string()).max(10),
+      survivor: z.enum(["mostActive", "oldest"]),
+    })
+    .optional(),
   // Secrets: only applied if a non-empty value is provided.
   claudeKey: z.string().optional(),
   openaiKey: z.string().optional(),
@@ -87,6 +98,7 @@ settingsRouter.patch("/", requireRole("ADMIN"), async (req, res) => {
   ] as const;
   for (const k of passthrough) if (d[k] !== undefined) data[k] = d[k];
   if (d.systemPrompt !== undefined) data.systemPrompt = d.systemPrompt;
+  if (d.mergeRules !== undefined) data.mergeRules = d.mergeRules;
 
   const secrets = ["claudeKey", "openaiKey", "whatsappToken", "verifyToken", "phoneNumberId", "wabaId"] as const;
   for (const k of secrets) if (d[k] && d[k]!.trim()) data[k] = d[k]!.trim();

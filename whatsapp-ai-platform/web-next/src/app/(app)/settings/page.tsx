@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, KeyRound, ScrollText, Webhook } from "lucide-react";
+import { Copy, GitMerge, KeyRound, ScrollText, Webhook } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
+import type { ContactField } from "@/lib/types";
 
 interface ApiKeyRow {
   id: string;
@@ -33,7 +34,19 @@ const btnPri = "h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs f
 const btnGhost = "h-8 px-3 rounded-lg border text-xs font-medium hover:bg-muted";
 const inputCls = "h-9 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-ring";
 
-type Tab = "keys" | "audit" | "webhooks";
+interface MergeRules {
+  phoneSuffix: boolean;
+  email: boolean;
+  externalId: boolean;
+  nameCity: boolean;
+  customFields: string[];
+  survivor: "mostActive" | "oldest";
+}
+const DEFAULT_RULES: MergeRules = {
+  phoneSuffix: true, email: true, externalId: true, nameCity: false, customFields: [], survivor: "mostActive",
+};
+
+type Tab = "keys" | "merge" | "audit" | "webhooks";
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>("keys");
@@ -42,13 +55,25 @@ export default function SettingsPage() {
   const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
   const [keyName, setKeyName] = useState("");
   const [freshSecret, setFreshSecret] = useState<string | null>(null);
+  const [rules, setRules] = useState<MergeRules>(DEFAULT_RULES);
+  const [fields, setFields] = useState<ContactField[]>([]);
+  const [rulesSaved, setRulesSaved] = useState(false);
 
   const load = useCallback(() => {
     api.get<{ keys: ApiKeyRow[] }>("/api-keys").then((r) => setKeys(r.keys)).catch(() => {});
     api.get<{ logs: AuditRow[] }>("/logs/audit").then((r) => setAudit(r.logs)).catch(() => {});
     api.get<{ logs: WebhookRow[] }>("/logs/webhooks").then((r) => setWebhooks(r.logs)).catch(() => {});
+    api.get<{ tenant: { mergeRules?: Partial<MergeRules> | null } }>("/settings")
+      .then((r) => setRules({ ...DEFAULT_RULES, ...(r.tenant.mergeRules || {}) })).catch(() => {});
+    api.get<{ fields: ContactField[] }>("/contact-fields").then((r) => setFields(r.fields)).catch(() => {});
   }, []);
   useEffect(load, [load]);
+
+  async function saveRules() {
+    await api.patch("/settings", { mergeRules: rules });
+    setRulesSaved(true);
+    setTimeout(() => setRulesSaved(false), 1800);
+  }
 
   async function createKey() {
     if (!keyName.trim()) return;
@@ -60,6 +85,7 @@ export default function SettingsPage() {
 
   const TABS: { v: Tab; label: string; icon: React.ElementType }[] = [
     { v: "keys", label: "API keys", icon: KeyRound },
+    { v: "merge", label: "Merge rules", icon: GitMerge },
     { v: "audit", label: "Audit log", icon: ScrollText },
     { v: "webhooks", label: "Webhook logs", icon: Webhook },
   ];
@@ -138,6 +164,96 @@ export default function SettingsPage() {
                   {keys.length === 0 && <tr><td colSpan={5} className="px-5 py-5 text-muted-foreground">No API keys yet.</td></tr>}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {tab === "merge" && (
+          <div className="max-w-2xl space-y-4">
+            <div className="rounded-xl border bg-card shadow-card p-6 space-y-4">
+              <div>
+                <h2 className="text-[15px] font-semibold">Duplicate detection rules</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Workspace-wide. Used by Contacts → Find duplicates.
+                </p>
+              </div>
+              {([
+                ["phoneSuffix", "Phone variants", "Same last 10 digits (with/without country code)"],
+                ["email", "Email match", "Same email, case-insensitive, on different numbers"],
+                ["externalId", "External CRM ID", "Same external id — always a safe signal"],
+                ["nameCity", "Name + city", "Same name in the same city — risky, off by default"],
+              ] as const).map(([key, label, desc]) => (
+                <div key={key} className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-medium">{label}</div>
+                    <div className="text-xs text-muted-foreground">{desc}</div>
+                  </div>
+                  <button
+                    onClick={() => setRules({ ...rules, [key]: !rules[key] })}
+                    className={clsx(
+                      "w-10 h-6 rounded-full transition-colors relative shrink-0",
+                      rules[key] ? "bg-primary" : "bg-muted"
+                    )}
+                  >
+                    <span className={clsx(
+                      "absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all",
+                      rules[key] ? "left-[18px]" : "left-0.5"
+                    )} />
+                  </button>
+                </div>
+              ))}
+
+              <div className="pt-2 border-t">
+                <div className="text-sm font-medium">Custom-field match keys</div>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Treat contacts with the same value in these fields as duplicates (e.g. PAN, member id).
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {fields.map((f) => {
+                    const on = rules.customFields.includes(f.key);
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => setRules({
+                          ...rules,
+                          customFields: on ? rules.customFields.filter((k) => k !== f.key) : [...rules.customFields, f.key],
+                        })}
+                        className={clsx(
+                          "text-xs px-3 h-7 rounded-full border font-medium",
+                          on ? "bg-accent text-accent-foreground border-primary" : "text-muted-foreground hover:bg-muted"
+                        )}
+                      >
+                        {f.label}
+                      </button>
+                    );
+                  })}
+                  {fields.length === 0 && <span className="text-xs text-muted-foreground">No custom fields defined yet.</span>}
+                </div>
+              </div>
+
+              <div className="pt-2 border-t">
+                <div className="text-sm font-medium mb-1.5">Survivor policy</div>
+                <div className="flex gap-1.5">
+                  {([["mostActive", "Most active (has chat / more messages)"], ["oldest", "Oldest record"]] as const).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => setRules({ ...rules, survivor: v })}
+                      className={clsx(
+                        "flex-1 h-9 rounded-lg border text-xs font-medium",
+                        rules.survivor === v ? "bg-accent text-accent-foreground border-primary" : "text-muted-foreground hover:bg-muted"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button className={btnPri} onClick={saveRules}>Save rules</button>
+                {rulesSaved && <span className="text-xs text-primary font-medium">Saved ✓</span>}
+                <span className="text-xs text-muted-foreground ml-auto">Merges are always human-confirmed — never automatic.</span>
+              </div>
             </div>
           </div>
         )}

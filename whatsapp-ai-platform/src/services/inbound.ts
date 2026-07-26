@@ -36,8 +36,10 @@ async function upsertConversation(
 
 /** Create the contact on first inbound, or fill in a missing name later. */
 async function upsertContact(tenantId: string, phone: string, name?: string) {
-  const existing = await prisma.contact.findUnique({
-    where: { tenantId_phone: { tenantId, phone } },
+  // Check the primary phone AND absorbed altPhones from merged duplicates,
+  // so a message from a merged-away number doesn't re-create the duplicate.
+  const existing = await prisma.contact.findFirst({
+    where: { tenantId, OR: [{ phone }, { altPhones: { has: phone } }] },
   });
   if (existing) {
     if (name && !existing.name) {

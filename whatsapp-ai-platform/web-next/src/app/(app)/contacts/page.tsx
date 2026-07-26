@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Users, Folder as FolderIcon, FolderPlus, Plus, Filter, ChevronDown, ChevronRight,
-  X, Search, Upload, Download, Trash2, SlidersHorizontal, Pencil,
+  X, Search, Upload, Download, Trash2, SlidersHorizontal, Pencil, GitMerge, Loader2,
 } from "lucide-react";
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
@@ -71,7 +71,15 @@ const inputCls = "w-full h-9 px-3 rounded-lg border bg-background text-sm outlin
 const btnPri = "h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 disabled:opacity-50";
 const btnGhost = "h-8 px-3 rounded-lg border text-xs font-medium hover:bg-muted";
 
-type DrawerKind = null | "segment" | "fields" | "add";
+type DrawerKind = null | "segment" | "fields" | "add" | "dupes";
+
+interface DupGroup {
+  reason: string;
+  field?: string;
+  key: string;
+  suggestedPrimaryId: string;
+  contacts: Contact[];
+}
 
 export default function ContactsPage() {
   const router = useRouter();
@@ -104,6 +112,12 @@ export default function ContactsPage() {
   const [form, setForm] = useState({ phone: "", name: "", city: "", tags: "" });
   const [formAttrs, setFormAttrs] = useState<Record<string, string>>({});
   const [newField, setNewField] = useState("");
+
+  // duplicate merge
+  const [dupGroups, setDupGroups] = useState<DupGroup[] | null>(null);
+  const [dupLoading, setDupLoading] = useState(false);
+  const [primaries, setPrimaries] = useState<Record<number, string>>({});
+  const [merging, setMerging] = useState<number | null>(null);
 
   const loadContacts = useCallback(() => {
     const p = new URLSearchParams();
@@ -173,6 +187,39 @@ export default function ContactsPage() {
     await api.del(`/segments/${id}`);
     if (activeSeg === id) setActiveSeg("");
     setDrawer(null); loadSegments();
+  }
+
+  // ---------- duplicate merge ----------
+  async function openDupes() {
+    setDrawer("dupes");
+    setDupLoading(true);
+    try {
+      const r = await api.get<{ groups: DupGroup[] }>("/contacts/duplicates");
+      setDupGroups(r.groups);
+      const pre: Record<number, string> = {};
+      r.groups.forEach((g, i) => { pre[i] = g.suggestedPrimaryId; });
+      setPrimaries(pre);
+    } finally {
+      setDupLoading(false);
+    }
+  }
+  async function mergeGroup(i: number) {
+    if (!dupGroups) return;
+    const g = dupGroups[i];
+    const primaryId = primaries[i] || g.suggestedPrimaryId;
+    const duplicateIds = g.contacts.filter((c) => c.id !== primaryId).map((c) => c.id);
+    setMerging(i);
+    try {
+      await api.post("/contacts/merge", { primaryId, duplicateIds });
+      const r = await api.get<{ groups: DupGroup[] }>("/contacts/duplicates");
+      setDupGroups(r.groups);
+      const pre: Record<number, string> = {};
+      r.groups.forEach((g2, idx) => { pre[idx] = g2.suggestedPrimaryId; });
+      setPrimaries(pre);
+      loadContacts(); loadAll();
+    } finally {
+      setMerging(null);
+    }
   }
 
   // ---------- csv ----------
@@ -354,6 +401,7 @@ export default function ContactsPage() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search…" className={clsx(inputCls, "pl-9")} />
           </div>
           <div className="flex-1" />
+          {canEdit && <button className={btnGhost} onClick={openDupes}><GitMerge className="w-3 h-3 inline mr-1" />Find duplicates</button>}
           <button className={btnGhost} onClick={exportCsv}><Download className="w-3 h-3 inline mr-1" />Export</button>
           {canEdit && (
             <button className={btnPri} onClick={() => { setForm({ phone: "", name: "", city: "", tags: "" }); setFormAttrs({}); setDrawer("add"); }}>
@@ -426,7 +474,10 @@ export default function ContactsPage() {
           <div className="w-[420px] max-w-[92vw] h-full bg-card border-l flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b flex items-center justify-between">
               <span className="font-semibold">
-                {drawer === "segment" ? (editingId ? "Edit segment" : "New segment") : drawer === "fields" ? "Custom fields" : "Add contact"}
+                {drawer === "segment" ? (editingId ? "Edit segment" : "New segment")
+                  : drawer === "fields" ? "Custom fields"
+                  : drawer === "dupes" ? "Duplicate contacts"
+                  : "Add contact"}
               </span>
               <button onClick={() => setDrawer(null)} className="p-1.5 rounded-md hover:bg-muted"><X className="w-4 h-4" /></button>
             </div>
@@ -496,6 +547,46 @@ export default function ContactsPage() {
                     <input className={inputCls} placeholder="New field, e.g. Budget" value={newField} onChange={(e) => setNewField(e.target.value)} />
                     <button className={btnPri} disabled={!newField.trim()} onClick={() => api.post("/contact-fields", { label: newField.trim(), type: "text" }).then(() => { setNewField(""); loadFields(); })}>Add</button>
                   </div>
+                </>
+              )}
+
+              {drawer === "dupes" && (
+                <>
+                  {dupLoading && <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Scanning…</div>}
+                  {!dupLoading && dupGroups && dupGroups.length === 0 && (
+                    <p className="text-sm text-muted-foreground">No duplicates found with the current rules. Adjust them in Settings → Merge rules.</p>
+                  )}
+                  {!dupLoading && dupGroups?.map((g, i) => (
+                    <div key={`${g.reason}-${g.key}`} className="rounded-xl border bg-muted/30 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent text-accent-foreground font-medium capitalize">
+                          {g.reason === "customField" ? `field: ${g.field}` : g.reason === "nameCity" ? "name + city" : g.reason}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground truncate">{g.key}</span>
+                      </div>
+                      {g.contacts.map((c) => (
+                        <label key={c.id} className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name={`primary-${i}`}
+                            checked={(primaries[i] || g.suggestedPrimaryId) === c.id}
+                            onChange={() => setPrimaries({ ...primaries, [i]: c.id })}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium truncate">
+                              {c.name || "Unknown"}
+                              {c.id === g.suggestedPrimaryId && <span className="ml-2 text-[10px] text-primary font-semibold">suggested</span>}
+                            </div>
+                            <div className="text-xs text-muted-foreground truncate">+{c.phone}{c.email ? ` · ${c.email}` : ""}{c.city ? ` · ${c.city}` : ""}</div>
+                          </div>
+                        </label>
+                      ))}
+                      <p className="text-[11px] text-muted-foreground">Selected record survives; others merge into it (empty fields filled, tags combined, numbers absorbed).</p>
+                      <button className={btnPri} disabled={merging === i} onClick={() => mergeGroup(i)}>
+                        {merging === i ? "Merging…" : `Merge ${g.contacts.length} contacts`}
+                      </button>
+                    </div>
+                  ))}
                 </>
               )}
 

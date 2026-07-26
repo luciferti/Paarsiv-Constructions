@@ -69,6 +69,8 @@ model Tenant {
   openaiKey      String?
   openaiModel    String   @default("gpt-4o-mini")
   systemPrompt   String?  // optional override; else built from knowledge+projects
+  // Duplicate-merge rules: { phoneSuffix, email, externalId, nameCity, survivor }
+  mergeRules     Json?
   createdAt      DateTime @default(now())
 
   users          User[]
@@ -262,6 +264,7 @@ model Contact {
   tenantId   String
   tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   phone      String   // E.164 without '+'
+  altPhones  String[] @default([]) // absorbed numbers from merged duplicates
   name       String?
   email      String?
   city       String?
