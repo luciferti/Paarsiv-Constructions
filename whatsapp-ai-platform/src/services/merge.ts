@@ -93,11 +93,11 @@ export async function pickSurvivor(tenantId: string, group: Contact[], policy: M
   let best = group[0];
   let bestScore = -1;
   for (const c of group) {
-    const conv = await prisma.conversation.findUnique({
-      where: { tenantId_phone: { tenantId, phone: c.phone } },
-      select: { id: true, _count: { select: { messages: true } } },
+    const convs = await prisma.conversation.findMany({
+      where: { tenantId, phone: c.phone },
+      select: { _count: { select: { messages: true } } },
     });
-    const score = conv ? 1000 + conv._count.messages : 0;
+    const score = convs.length ? 1000 + convs.reduce((n, cv) => n + cv._count.messages, 0) : 0;
     if (score > bestScore || (score === bestScore && c.createdAt < best.createdAt)) {
       best = c;
       bestScore = score;

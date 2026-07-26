@@ -11,6 +11,23 @@ export interface Conversation {
   labels?: string[];
   assignedUserId?: string | null;
   assignedUser?: { id: string; displayName: string } | null;
+  /** Which of our numbers this thread is on. */
+  phoneNumberId?: string;
+  senderNumber?: SenderNumber | null;
+}
+
+/** A WhatsApp number the workspace sends and receives on. */
+export interface SenderNumber {
+  phoneNumberId: string;
+  displayPhoneNumber: string;
+  label?: string | null;
+}
+
+export interface InboxNumber extends SenderNumber {
+  isDefault: boolean;
+  active: boolean;
+  qualityRating?: string | null;
+  conversationCount: number;
 }
 
 export interface Note {

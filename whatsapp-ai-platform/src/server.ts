@@ -106,13 +106,14 @@ app.use("/uploads", express.static(UPLOAD_DIR)); // serve uploaded media
 // ---- Dev-only: simulate an inbound WhatsApp message (no Meta needed) ----
 if (IS_DEV) {
   app.post("/api/dev/simulate-inbound", async (req, res) => {
-    const { tenantSlug, phone, text, customerName } = req.body || {};
+    const { tenantSlug, phone, text, customerName, phoneNumberId } = req.body || {};
     if (!tenantSlug || !phone || !text) {
       return res.status(400).json({ error: "tenantSlug, phone, text required" });
     }
     const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
     if (!tenant) return res.status(404).json({ error: "tenant not found" });
     const msg: InboundMessage = {
+      phoneNumberId: phoneNumberId ? String(phoneNumberId) : undefined,
       phone: String(phone),
       text: String(text),
       customerName,

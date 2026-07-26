@@ -41,8 +41,17 @@ interface Status {
   lastSteps?: Step[] | null;
 }
 interface NumberRow {
-  id: string; displayPhoneNumber: string; verifiedName?: string;
-  qualityRating?: string; status?: string; codeVerificationStatus?: string; messagingLimit?: string;
+  id: string;
+  /** Meta's id — what everything routes on. */
+  phoneNumberId: string;
+  displayPhoneNumber: string;
+  verifiedName?: string | null;
+  qualityRating?: string | null;
+  codeVerificationStatus?: string | null;
+  messagingLimit?: string | null;
+  label?: string | null;
+  isDefault: boolean;
+  active: boolean;
 }
 interface Profile {
   about?: string; address?: string; description?: string;
@@ -285,12 +294,27 @@ export default function WhatsAppSetupPage() {
     finally { setBusy(null); }
   }
 
-  async function useNumber(id: string) {
+  async function renameNumber(phoneNumberId: string, label: string) {
     setBusy("number"); setErr(null);
     try {
-      const r = await api.post<{ status: Status }>("/whatsapp/numbers/select", { phoneNumberId: id });
-      setStatus(r.status);
-    } catch (e) { failure(e, "Could not switch number."); }
+      const r = await api.patch<{ numbers: NumberRow[] }>(`/whatsapp/numbers/${phoneNumberId}`, {
+        label: label || null,
+      });
+      setNumbers(r.numbers);
+    } catch (e) { failure(e, "Could not rename that number."); }
+    finally { setBusy(null); }
+  }
+
+  /** The default is what campaigns and one-off sends use when nothing says otherwise. */
+  async function makeDefault(phoneNumberId: string) {
+    setBusy("number"); setErr(null);
+    try {
+      const r = await api.patch<{ numbers: NumberRow[] }>(`/whatsapp/numbers/${phoneNumberId}`, {
+        isDefault: true,
+      });
+      setNumbers(r.numbers);
+      await load();
+    } catch (e) { failure(e, "Could not change the default."); }
     finally { setBusy(null); }
   }
 
@@ -550,17 +574,35 @@ export default function WhatsAppSetupPage() {
                         return (
                           <div key={n.id} className="px-5 py-3 flex items-center gap-3 flex-wrap">
                             <div className="min-w-0 flex-1">
-                              <div className="text-sm font-medium">{n.displayPhoneNumber}</div>
-                              <div className="text-[11px] text-muted-foreground">{n.verifiedName || "no display name yet"}</div>
+                              <div className="text-sm font-medium flex items-center gap-2">
+                                {n.label || n.displayPhoneNumber}
+                                <button
+                                  className="text-[11px] text-muted-foreground hover:text-primary underline underline-offset-2"
+                                  onClick={() => {
+                                    const v = prompt("Name this number — the team sees it in the inbox:", n.label || "");
+                                    if (v !== null) void renameNumber(n.phoneNumberId, v.trim());
+                                  }}
+                                >
+                                  rename
+                                </button>
+                              </div>
+                              <div className="text-[11px] text-muted-foreground">
+                                {n.displayPhoneNumber}{n.verifiedName ? ` · ${n.verifiedName}` : ""}
+                              </div>
                             </div>
                             <Pill tone={verified ? "good" : "warn"}>{verified ? "verified" : "needs verifying"}</Pill>
                             <Pill tone={qualityTone(n.qualityRating)}>{n.qualityRating?.toLowerCase() || "no rating"}</Pill>
-                            {n.id === status.number?.id
-                              ? <Pill tone="good">sending</Pill>
-                              : <button className={btnGhost} disabled={busy !== null} onClick={() => useNumber(n.id)}>Use this</button>}
+                            {n.isDefault
+                              ? <Pill tone="good">default</Pill>
+                              : (
+                                <button className={btnGhost} disabled={busy !== null}
+                                  onClick={() => makeDefault(n.phoneNumberId)}>
+                                  Make default
+                                </button>
+                              )}
                             {!verified && (
                               <button className={btnGhost} disabled={busy !== null}
-                                onClick={() => { setOtp({ phoneNumberId: n.id, method: "SMS", code: "", requested: false }); setNote(null); }}>
+                                onClick={() => { setOtp({ phoneNumberId: n.phoneNumberId, method: "SMS", code: "", requested: false }); setNote(null); }}>
                                 Verify
                               </button>
                             )}
@@ -618,7 +660,7 @@ export default function WhatsAppSetupPage() {
                   <div className="flex">
                     <button className={btnGhost} onClick={() => setStep(2)}>Back</button>
                     <div className="flex-1" />
-                    <button className={btnPri} onClick={() => setStep(4)} disabled={!status.number?.id}>Continue</button>
+                    <button className={btnPri} onClick={() => setStep(4)} disabled={numbers.length === 0}>Continue</button>
                   </div>
                 </>
               ) : (

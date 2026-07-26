@@ -119,6 +119,7 @@ model Tenant {
   assets          Asset[]
   assetFolders    AssetFolder[]
   campaigns       Campaign[]
+  phoneNumbers    PhoneNumber[]
   journeys        Journey[]
   apiKeys         ApiKey[]
   auditLogs       AuditLog[]
@@ -207,10 +208,36 @@ model User {
 }
 
 // ---------------- Conversation ----------------
+// ---------------- PhoneNumber (a WhatsApp sender the workspace owns) --------
+// One row per number on the connected WABA(s). Everything inbound is routed by
+// `phoneNumberId`, and every conversation belongs to exactly one of these.
+model PhoneNumber {
+  id                     String   @id @default(cuid())
+  tenantId               String
+  tenant                 Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phoneNumberId          String   @unique // Meta's id — how webhooks find us
+  wabaId                 String?
+  displayPhoneNumber     String
+  verifiedName           String?
+  qualityRating          String?
+  messagingLimit         String?
+  codeVerificationStatus String?
+  label                  String?  // what the team calls it: "Sales", "Support"
+  isDefault              Boolean  @default(false)
+  active                 Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
 model Conversation {
   id             String    @id @default(cuid())
   tenantId       String
   tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Which of our numbers this thread is on — Meta's id, not a local row id.
+  // "" means the workspace has no numbers yet (demo / pre-connect).
+  phoneNumberId  String    @default("")
   phone          String    // E.164 without '+'
   customerName   String?
   lastMessage    String?
@@ -226,8 +253,11 @@ model Conversation {
   messages       Message[]
   notes          Note[]
 
-  @@unique([tenantId, phone])
+  // The same customer writing to two of our numbers is two conversations —
+  // that's how WhatsApp models it, and each has its own 24-hour window.
+  @@unique([tenantId, phoneNumberId, phone])
   @@index([tenantId, assignedUserId])
+  @@index([tenantId, phoneNumberId])
 }
 
 // ---------------- Message ----------------
@@ -472,6 +502,8 @@ model Campaign {
   templateId     String?
   template       Template? @relation(fields: [templateId], references: [id])
   segmentId      String?
+  // Which of our numbers this went out from — blank means the default.
+  phoneNumberId  String    @default("")
   status         String    @default("DRAFT") // DRAFT | SENDING | SENT | FAILED
   scheduledAt    DateTime?
   totalCount     Int       @default(0)

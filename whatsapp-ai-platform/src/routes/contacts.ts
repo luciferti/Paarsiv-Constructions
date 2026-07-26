@@ -254,8 +254,11 @@ contactsRouter.get("/:id/360", async (req, res) => {
   const contact = await prisma.contact.findFirst({ where: { id: req.params.id, tenantId } });
   if (!contact) return res.status(404).json({ error: "not found" });
 
-  const conversation = await prisma.conversation.findUnique({
-    where: { tenantId_phone: { tenantId, phone: contact.phone } },
+  // With several numbers a contact can have a thread on each — show the one
+  // they last used.
+  const conversation = await prisma.conversation.findFirst({
+    where: { tenantId, phone: contact.phone },
+    orderBy: { lastMessageAt: "desc" },
     include: { assignedUser: { select: { id: true, displayName: true } } },
   });
 

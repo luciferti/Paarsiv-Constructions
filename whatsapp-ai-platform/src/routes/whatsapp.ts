@@ -6,6 +6,7 @@ import { prisma } from "../lib/prisma";
 import { env } from "../lib/env";
 import { requireAuth, requirePermission } from "../middleware/auth";
 import { audit, auditRaw } from "../lib/audit";
+import { activeNumbers, setDefault, syncNumbers } from "../services/numbers";
 import {
   MetaApiError,
   StepFailure,
@@ -86,6 +87,9 @@ whatsappRouter.get("/callback", async (req, res) => {
 
   try {
     const result = await completeSignup(tenant, { code });
+    // Mirror every number on the account so each becomes a usable channel.
+    const fresh = await prisma.tenant.findUniqueOrThrow({ where: { id: tenant.id } });
+    await syncNumbers(fresh).catch(() => {});
     auditRaw(tenant.id, "whatsapp.connected", {
       meta: { wabaId: result.wabaId, phoneNumberId: result.phoneNumberId, via: "redirect" },
     });
@@ -346,6 +350,7 @@ whatsappRouter.post("/connect", requirePermission("settings.manage"), async (req
     const result = await completeSignup(tenant, parsed.data);
     audit(req, "whatsapp.connected", { meta: { wabaId: result.wabaId, phoneNumberId: result.phoneNumberId } });
     const fresh = await tenantOf(req);
+    await syncNumbers(fresh).catch(() => {});
     res.json({ status: statusOf(fresh, env.publicUrl), steps: result.steps });
   } catch (e) {
     if (e instanceof StepFailure) {
@@ -363,6 +368,7 @@ whatsappRouter.post("/verify", requirePermission("settings.manage"), async (req,
   const tenant = await tenantOf(req);
   const checks = await verifyConnection(tenant);
   const fresh = await tenantOf(req);
+  await syncNumbers(fresh).catch(() => {});
   res.json({ status: statusOf(fresh, env.publicUrl), checks });
 });
 
@@ -386,15 +392,52 @@ whatsappRouter.post("/repair", requirePermission("settings.manage"), async (req,
   }
 });
 
-/** GET /whatsapp/numbers — the numbers on the connected account. */
+/**
+ * GET /whatsapp/numbers — the workspace's senders. Refreshed from Meta when a
+ * connection exists, so labels and defaults survive but quality is current.
+ */
 whatsappRouter.get("/numbers", requirePermission("settings.manage"), async (req, res) => {
   const tenant = await tenantOf(req);
-  if (!tenant.whatsappToken || !tenant.wabaId) return res.json({ numbers: [] });
   try {
-    res.json({ numbers: await listPhoneNumbers(tenant, tenant.whatsappToken, tenant.wabaId) });
+    const numbers = tenant.whatsappToken && tenant.wabaId
+      ? await syncNumbers(tenant)
+      : await activeNumbers(tenant.id);
+    res.json({ numbers });
   } catch (e) {
     sendMetaError(res, e);
   }
+});
+
+const numberPatchSchema = z.object({
+  label: z.string().trim().max(60).nullable().optional(),
+  isDefault: z.boolean().optional(),
+  active: z.boolean().optional(),
+});
+
+/** PATCH /whatsapp/numbers/:phoneNumberId — name it, default it, retire it. */
+whatsappRouter.patch("/numbers/:phoneNumberId", requirePermission("settings.manage"), async (req, res) => {
+  const parsed = numberPatchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const tenant = await tenantOf(req);
+  const target = await prisma.phoneNumber.findFirst({
+    where: { tenantId: tenant.id, phoneNumberId: req.params.phoneNumberId },
+  });
+  if (!target) return res.status(404).json({ error: "That number isn't in this workspace." });
+
+  const d = parsed.data;
+  if (d.isDefault) await setDefault(tenant.id, target.phoneNumberId);
+  if (d.active === false && target.isDefault) {
+    return res.status(400).json({ error: "Make another number the default before retiring this one." });
+  }
+  await prisma.phoneNumber.update({
+    where: { id: target.id },
+    data: {
+      ...(d.label !== undefined ? { label: d.label } : {}),
+      ...(d.active !== undefined ? { active: d.active } : {}),
+    },
+  });
+  audit(req, "whatsapp.number_updated", { meta: { phoneNumberId: target.phoneNumberId, ...d } });
+  res.json({ numbers: await activeNumbers(tenant.id) });
 });
 
 const numberSchema = z.object({

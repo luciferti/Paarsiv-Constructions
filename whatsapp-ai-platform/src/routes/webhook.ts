@@ -37,9 +37,12 @@ webhookRouter.post("/", async (req, res) => {
         const phoneNumberId: string | undefined = value.metadata?.phone_number_id;
         if (!phoneNumberId) continue;
 
-        const tenant = await prisma.tenant.findFirst({
-          where: { phoneNumberId },
-        });
+        // Route by the number the message arrived on. Falls back to the
+        // tenant's own field for workspaces set up before multi-number.
+        const owned = await prisma.phoneNumber.findUnique({ where: { phoneNumberId } });
+        const tenant = owned
+          ? await prisma.tenant.findUnique({ where: { id: owned.tenantId } })
+          : await prisma.tenant.findFirst({ where: { phoneNumberId } });
         // Keep an inspectable trail of every inbound event.
         prisma.webhookLog
           .create({
@@ -70,6 +73,7 @@ webhookRouter.post("/", async (req, res) => {
           if (!text) continue;
 
           const inbound: InboundMessage = {
+            phoneNumberId,
             phone: m.from,
             text,
             waMessageId: m.id,

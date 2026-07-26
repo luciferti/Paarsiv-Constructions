@@ -224,6 +224,33 @@ async function main() {
   }
   console.log(`quick replies: ${quickReplies.length}`);
 
+  // Two senders so the multi-number behaviour is visible without a live WABA.
+  const senders = [
+    { phoneNumberId: "demo-sales", displayPhoneNumber: "+91 80 4718 0001", label: "Sales", isDefault: true },
+    { phoneNumberId: "demo-support", displayPhoneNumber: "+91 80 4718 0002", label: "Support", isDefault: false },
+  ];
+  for (const n of senders) {
+    await prisma.phoneNumber.upsert({
+      where: { phoneNumberId: n.phoneNumberId },
+      update: { label: n.label },
+      create: {
+        tenantId: tenant.id,
+        wabaId: "demo-waba",
+        verifiedName: "Demo Realty",
+        qualityRating: "GREEN",
+        messagingLimit: "TIER_1K",
+        codeVerificationStatus: "VERIFIED",
+        ...n,
+      },
+    });
+  }
+  // Existing threads predate multi-number — put them on the default sender.
+  const moved = await prisma.conversation.updateMany({
+    where: { tenantId: tenant.id, phoneNumberId: "" },
+    data: { phoneNumberId: "demo-sales" },
+  });
+  console.log(`senders: ${senders.length} (${moved.count} existing conversations moved to Sales)`);
+
   console.log("\nDone. Login at tenant 'demo':");
   console.log(`  admin / ${ADMIN_PW}`);
   console.log(`  priya, arjun, sana, neha, vikram, rohit / ${AGENT_PW}`);

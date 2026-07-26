@@ -21,11 +21,14 @@ conversationsRouter.get("/", async (req, res) => {
   const where = await conversationVisibilityWhere(req.auth!);
   const status = typeof req.query.status === "string" ? req.query.status : undefined;
   const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+  // Which of our numbers to show; absent means every number.
+  const phoneNumberId = typeof req.query.phoneNumberId === "string" ? req.query.phoneNumberId : "";
 
   const paging = parsePaging(req, 50);
   const listWhere = {
     ...where,
     ...(status ? { status } : {}),
+    ...(phoneNumberId ? { phoneNumberId } : {}),
     ...(search
       ? {
           OR: [
@@ -45,7 +48,40 @@ conversationsRouter.get("/", async (req, res) => {
     }),
     prisma.conversation.count({ where: listWhere }),
   ]);
-  res.json({ conversations: list, ...pageMeta(total, paging) });
+  // Attach which of our numbers each thread is on, for the inbox badges.
+  const senders = await prisma.phoneNumber.findMany({
+    where: { tenantId: req.auth!.tenantId },
+    select: { phoneNumberId: true, displayPhoneNumber: true, label: true },
+  });
+  const byId = new Map(senders.map((n) => [n.phoneNumberId, n]));
+  const conversations = list.map((c) => ({ ...c, senderNumber: byId.get(c.phoneNumberId) ?? null }));
+
+  res.json({ conversations, ...pageMeta(total, paging) });
+});
+
+/**
+ * GET /conversations/numbers — the senders that actually have conversations,
+ * so the inbox filter only offers numbers with something behind them.
+ */
+conversationsRouter.get("/numbers", async (req, res) => {
+  const numbers = await prisma.phoneNumber.findMany({
+    where: { tenantId: req.auth!.tenantId },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    select: {
+      phoneNumberId: true, displayPhoneNumber: true, label: true,
+      isDefault: true, active: true, qualityRating: true,
+    },
+  });
+  // Conversation counts come from the column, since there's no FK relation.
+  const counts = await prisma.conversation.groupBy({
+    by: ["phoneNumberId"],
+    where: { tenantId: req.auth!.tenantId },
+    _count: { _all: true },
+  });
+  const countBy = new Map(counts.map((c) => [c.phoneNumberId, c._count._all]));
+  res.json({
+    numbers: numbers.map((n) => ({ ...n, conversationCount: countBy.get(n.phoneNumberId) ?? 0 })),
+  });
 });
 
 /** GET /conversations/:id/messages — thread history + marks read. */

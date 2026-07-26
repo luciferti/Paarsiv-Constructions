@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { emitRealtime } from "../lib/events";
 import { sendWhatsAppText } from "./whatsapp";
+import { resolveSender, senderCredentials } from "./numbers";
 import type { Tenant } from "@prisma/client";
 
 const PREVIEW_LEN = 120;
@@ -15,15 +16,20 @@ export async function sendOutbound(
   tenant: Tenant,
   phone: string,
   text: string,
-  sentBy: "AI" | "AGENT"
+  sentBy: "AI" | "AGENT",
+  /** Which of our numbers to send from; the default when not given. */
+  fromPhoneNumberId?: string | null
 ) {
+  const sender = await resolveSender(tenant.id, fromPhoneNumberId);
+  const on = sender?.phoneNumberId ?? "";
+
   const conv = await prisma.conversation.upsert({
-    where: { tenantId_phone: { tenantId: tenant.id, phone } },
+    where: { tenantId_phoneNumberId_phone: { tenantId: tenant.id, phoneNumberId: on, phone } },
     update: {},
-    create: { tenantId: tenant.id, phone },
+    create: { tenantId: tenant.id, phoneNumberId: on, phone },
   });
 
-  const result = await sendWhatsAppText(tenant, phone, text);
+  const result = await sendWhatsAppText(senderCredentials(tenant, sender), phone, text);
 
   const message = await prisma.message.create({
     data: {

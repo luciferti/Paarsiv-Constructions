@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Search, User as UserIcon, Send, PhoneCall, MapPin, Tag as TagIcon,
-  CircleDot, Loader2, Sparkles, Smile, Meh, Frown, Zap, StickyNote, Plus, X,
+  CircleDot, Loader2, Sparkles, Smile, Meh, Frown, Zap, StickyNote, Plus, X, Phone,
 } from "lucide-react";
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
 import { connectSocket, getSocket } from "@/lib/socket";
-import type { Contact, ContactField, Conversation, Message, Note, QuickReply } from "@/lib/types";
+import type {
+  Contact, ContactField, Conversation, InboxNumber, Message, Note, QuickReply,
+} from "@/lib/types";
 
 type Filter = "all" | "unread" | "ai" | "human";
 
@@ -56,19 +58,29 @@ export default function InboxPage() {
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [qrOpen, setQrOpen] = useState(false);
 
+  // Which of our numbers to show — "" is every number.
+  const [numbers, setNumbers] = useState<InboxNumber[]>([]);
+  const [numberFilter, setNumberFilter] = useState("");
+
   const active = conversations.find((c) => c.id === activeId) || null;
 
   const loadConversations = useCallback(() => {
-    const q = search ? `?search=${encodeURIComponent(search)}` : "";
-    api.get<{ conversations: Conversation[] }>(`/conversations${q}`)
+    const p = new URLSearchParams();
+    if (search) p.set("search", search);
+    if (numberFilter) p.set("phoneNumberId", numberFilter);
+    const q = p.toString();
+    api.get<{ conversations: Conversation[] }>(`/conversations${q ? `?${q}` : ""}`)
       .then((r) => setConversations(r.conversations))
       .catch(() => {});
-  }, [search]);
+  }, [search, numberFilter]);
 
   useEffect(loadConversations, [loadConversations]);
   useEffect(() => {
     api.get<{ fields: ContactField[] }>("/contact-fields").then((r) => setFields(r.fields)).catch(() => {});
     api.get<{ replies: QuickReply[] }>("/quick-replies").then((r) => setQuickReplies(r.replies)).catch(() => {});
+    api.get<{ numbers: InboxNumber[] }>("/conversations/numbers")
+      .then((r) => setNumbers(r.numbers.filter((n) => n.active || n.conversationCount > 0)))
+      .catch(() => {});
   }, []);
 
   // Realtime: conversation list updates
@@ -218,6 +230,38 @@ export default function InboxPage() {
               className="w-full h-9 pl-9 pr-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
+          {numbers.length > 1 && (
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+              <button
+                onClick={() => setNumberFilter("")}
+                className={clsx(
+                  "px-2.5 h-7 rounded-full text-xs font-medium border shrink-0",
+                  numberFilter === ""
+                    ? "bg-accent text-accent-foreground border-primary"
+                    : "text-muted-foreground hover:bg-muted"
+                )}
+              >
+                All numbers
+              </button>
+              {numbers.map((n) => (
+                <button
+                  key={n.phoneNumberId}
+                  onClick={() => setNumberFilter(n.phoneNumberId)}
+                  title={n.displayPhoneNumber}
+                  className={clsx(
+                    "px-2.5 h-7 rounded-full text-xs font-medium border shrink-0 flex items-center gap-1.5",
+                    numberFilter === n.phoneNumberId
+                      ? "bg-accent text-accent-foreground border-primary"
+                      : "text-muted-foreground hover:bg-muted"
+                  )}
+                >
+                  <Phone className="w-3 h-3" />
+                  {n.label || n.displayPhoneNumber}
+                  <span className="opacity-60">{n.conversationCount}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex gap-1.5">
             {FILTERS.map((f) => (
               <button
@@ -267,6 +311,13 @@ export default function InboxPage() {
                       {c.assignedUser.displayName}
                     </span>
                   )}
+                  {/* Which number it came in on — only worth showing when
+                      there's more than one, and not while filtered to it. */}
+                  {numbers.length > 1 && !numberFilter && c.senderNumber && (
+                    <span className="text-[10px] px-1.5 py-px rounded bg-muted text-muted-foreground truncate max-w-[7rem]">
+                      {c.senderNumber.label || c.senderNumber.displayPhoneNumber}
+                    </span>
+                  )}
                 </div>
               </div>
               {c.unreadCount > 0 && (
@@ -294,6 +345,14 @@ export default function InboxPage() {
                 <div className="text-sm font-semibold truncate">{active.customerName || active.phone}</div>
                 <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
                   <span>+{active.phone} · {active.mode === "AI" ? "AI auto-reply" : "Human handling"}</span>
+                  {/* Replies leave from this number — say so, so nobody
+                      wonders which one the customer will see. */}
+                  {active.senderNumber && numbers.length > 1 && (
+                    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-px rounded-full border text-muted-foreground">
+                      <Phone className="w-2.5 h-2.5" />
+                      via {active.senderNumber.label || active.senderNumber.displayPhoneNumber}
+                    </span>
+                  )}
                   {(active.labels || []).map((l) => (
                     <span key={l} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-px rounded-full bg-accent text-accent-foreground font-medium group">
                       {l}

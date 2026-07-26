@@ -128,13 +128,17 @@ async function evaluateCondition(
   if (check === "replied") {
     // Any customer message after the journey started.
     const since = ctx.startedAt ?? new Date(Date.now() - 60_000);
-    const conv = await prisma.conversation.findUnique({
-      where: { tenantId_phone: { tenantId, phone: ctx.phone } },
+    const convs = await prisma.conversation.findMany({
+      where: { tenantId, phone: ctx.phone },
       select: { id: true },
     });
-    if (!conv) return false;
+    if (!convs.length) return false;
     const reply = await prisma.message.findFirst({
-      where: { conversationId: conv.id, direction: "INBOUND", timestamp: { gt: since } },
+      where: {
+        conversationId: { in: convs.map((c) => c.id) },
+        direction: "INBOUND",
+        timestamp: { gt: since },
+      },
       select: { id: true },
     });
     return !!reply;

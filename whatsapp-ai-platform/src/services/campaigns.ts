@@ -3,6 +3,7 @@ import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { fillTokens } from "../lib/tokens";
 import { sendWhatsAppText } from "./whatsapp";
 import { emitRealtime } from "../lib/events";
+import { resolveSender, senderCredentials } from "./numbers";
 import type { Tenant } from "@prisma/client";
 
 /** Resolve a campaign's audience: opted-in contacts in its segment (or all). */
@@ -54,13 +55,16 @@ export async function runCampaign(tenant: Tenant, campaignId: string) {
     read = 0,
     failed = 0;
 
+  // Campaigns go out from the number chosen when the campaign was built.
+  const sender = await resolveSender(tenant.id, campaign.phoneNumberId);
+
   // With a real number connected, delivered/read arrive on Meta's status
   // webhooks — inventing them there would report numbers that never happened.
-  const live = !!(tenant.phoneNumberId && tenant.whatsappToken);
+  const live = !!(sender?.phoneNumberId || tenant.phoneNumberId) && !!tenant.whatsappToken;
 
   for (const contact of audience) {
     const text = fillTokens(campaign.template.body, contact);
-    const result = await sendWhatsAppText(tenant, contact.phone, text);
+    const result = await sendWhatsAppText(senderCredentials(tenant, sender), contact.phone, text);
 
     let status: string;
     if (!result.ok) {

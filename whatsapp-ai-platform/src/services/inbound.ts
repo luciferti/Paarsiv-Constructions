@@ -5,6 +5,7 @@ import { triggerNewContactJourneys, tryTriggerJourney } from "./journeys";
 import { sendWhatsAppText } from "./whatsapp";
 import { applyConsent, classify } from "./consent";
 import { auditRaw } from "../lib/audit";
+import { defaultNumber, resolveSender, senderCredentials } from "./numbers";
 import type { Tenant, Conversation } from "@prisma/client";
 
 const PREVIEW_LEN = 120;
@@ -13,14 +14,19 @@ function preview(text: string): string {
   return text.length > PREVIEW_LEN ? text.slice(0, PREVIEW_LEN - 1) + "…" : text;
 }
 
-/** Find or create a conversation for a phone within a tenant. */
+/**
+ * Find or create a conversation. Scoped to the number the customer wrote to —
+ * the same person messaging Sales and Support is two separate threads, each
+ * with its own 24-hour window, exactly as WhatsApp treats them.
+ */
 async function upsertConversation(
   tenantId: string,
+  phoneNumberId: string,
   phone: string,
   customerName?: string
 ): Promise<Conversation> {
   const existing = await prisma.conversation.findUnique({
-    where: { tenantId_phone: { tenantId, phone } },
+    where: { tenantId_phoneNumberId_phone: { tenantId, phoneNumberId, phone } },
   });
   if (existing) {
     if (customerName && !existing.customerName) {
@@ -32,7 +38,7 @@ async function upsertConversation(
     return existing;
   }
   return prisma.conversation.create({
-    data: { tenantId, phone, customerName },
+    data: { tenantId, phoneNumberId, phone, customerName },
   });
 }
 
@@ -56,6 +62,8 @@ async function upsertContact(tenantId: string, phone: string, name?: string) {
 }
 
 export interface InboundMessage {
+  /** Which of our numbers it arrived on (Meta's phone_number_id). */
+  phoneNumberId?: string;
   phone: string;
   text: string;
   waMessageId?: string;
@@ -77,7 +85,8 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
     if (dupe) return;
   }
 
-  const conv = await upsertConversation(tenant.id, msg.phone, msg.customerName);
+  const inboundOn = msg.phoneNumberId || (await defaultNumber(tenant.id))?.phoneNumberId || "";
+  const conv = await upsertConversation(tenant.id, inboundOn, msg.phone, msg.customerName);
 
   const consentAction = classify(tenant, msg.text);
 
@@ -170,7 +179,10 @@ export async function sendReply(
   sentBy: "AI" | "AGENT",
   senderId?: string
 ) {
-  const result = await sendWhatsAppText(tenant, conv.phone, text);
+  // Always reply on the number the customer wrote to — anything else would
+  // start a new thread on their phone.
+  const sender = await resolveSender(tenant.id, conv.phoneNumberId);
+  const result = await sendWhatsAppText(senderCredentials(tenant, sender), conv.phone, text);
 
   const outbound = await prisma.message.create({
     data: {

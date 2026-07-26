@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, CalendarClock, Check, FileText, GalleryHorizontalEnd, Image as ImageIcon,
-  Loader2, Send, Users, Video,
+  Loader2, Phone, Send, Users, Video,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
-import type { Segment, Template } from "@/lib/types";
+import type { InboxNumber, Segment, Template } from "@/lib/types";
 
 const input = "w-full h-10 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-ring";
 const label = "text-xs font-medium text-muted-foreground";
@@ -31,6 +31,8 @@ export default function NewCampaignPage() {
   const [name, setName] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [segmentId, setSegmentId] = useState("");
+  const [numbers, setNumbers] = useState<InboxNumber[]>([]);
+  const [phoneNumberId, setPhoneNumberId] = useState("");
   const [when, setWhen] = useState<"draft" | "later">("draft");
   const [scheduledAt, setScheduledAt] = useState("");
   const [saving, setSaving] = useState(false);
@@ -40,6 +42,13 @@ export default function NewCampaignPage() {
     api.get<{ templates: Template[] }>("/templates").then((r) => setTemplates(r.templates)).catch(() => {});
     api.get<{ segments: Segment[] }>("/segments").then((r) => setSegments(r.segments)).catch(() => {});
     api.get<{ total: number }>("/contacts").then((r) => setAllContacts(r.total)).catch(() => {});
+    api.get<{ numbers: InboxNumber[] }>("/conversations/numbers")
+      .then((r) => {
+        const usable = r.numbers.filter((n) => n.active);
+        setNumbers(usable);
+        setPhoneNumberId((prev) => prev || usable.find((n) => n.isDefault)?.phoneNumberId || usable[0]?.phoneNumberId || "");
+      })
+      .catch(() => {});
   }, []);
 
   const template = templates.find((t) => t.id === templateId) || null;
@@ -56,6 +65,7 @@ export default function NewCampaignPage() {
         name: name.trim(),
         templateId,
         segmentId: segmentId || null,
+        ...(phoneNumberId ? { phoneNumberId } : {}),
         ...(when === "later" ? { scheduledAt: new Date(scheduledAt).toISOString() } : {}),
       });
       router.push("/campaigns");
@@ -199,10 +209,41 @@ export default function NewCampaignPage() {
               </div>
             </section>
 
-            {/* 4. schedule */}
+            {/* 4. sending number */}
+            {numbers.length > 1 && (
+              <section className="space-y-3">
+                <h2 className="text-sm font-semibold">
+                  <span className="text-muted-foreground mr-1.5">4.</span>Send from
+                </h2>
+                <p className="text-xs text-muted-foreground -mt-1">
+                  Replies land in this number&apos;s inbox, so pick the one the team watching this campaign uses.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  {numbers.map((n) => {
+                    const sel = n.phoneNumberId === phoneNumberId;
+                    return (
+                      <button key={n.phoneNumberId} onClick={() => setPhoneNumberId(n.phoneNumberId)}
+                        className={clsx("text-left rounded-xl border-2 p-4 transition-colors",
+                          sel ? "border-primary bg-accent" : "hover:bg-muted/60")}>
+                        <div className="flex items-center gap-2">
+                          <Phone className={clsx("w-4 h-4", sel ? "text-primary" : "text-muted-foreground")} />
+                          <span className="text-sm font-medium flex-1">{n.label || n.displayPhoneNumber}</span>
+                          {sel && <Check className="w-3.5 h-3.5 text-primary" />}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {n.displayPhoneNumber}{n.isDefault ? " · default" : ""}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {/* 5. schedule */}
             <section className="space-y-3">
               <h2 className="text-sm font-semibold">
-                <span className="text-muted-foreground mr-1.5">4.</span>When to send
+                <span className="text-muted-foreground mr-1.5">{numbers.length > 1 ? 5 : 4}.</span>When to send
               </h2>
               <div className="grid grid-cols-2 gap-3">
                 {([

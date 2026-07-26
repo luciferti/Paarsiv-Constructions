@@ -7,6 +7,7 @@ import { runCampaign } from "../services/campaigns";
 import { audit } from "../lib/audit";
 import { parseRange, dateFilter } from "../lib/dateRange";
 import { pageMeta, parsePaging } from "../lib/pagination";
+import { resolveSender } from "../services/numbers";
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -67,6 +68,8 @@ const createSchema = z.object({
   name: z.string().min(1),
   templateId: z.string().min(1),
   segmentId: z.string().nullable().optional(),
+  /** Which of our numbers it goes out from; blank uses the default. */
+  phoneNumberId: z.string().optional(),
   scheduledAt: z.string().datetime().optional(), // ISO → status SCHEDULED
 });
 
@@ -81,6 +84,12 @@ campaignsRouter.post("/", requirePermission("campaigns.create"), async (req, res
   });
   if (!tpl) return res.status(400).json({ error: "invalid template" });
 
+  // A campaign must leave from a number this workspace actually owns.
+  const sender = await resolveSender(req.auth!.tenantId, d.phoneNumberId);
+  if (d.phoneNumberId && sender?.phoneNumberId !== d.phoneNumberId) {
+    return res.status(400).json({ error: "That sending number isn't available." });
+  }
+
   const total = await audienceCount(req.auth!.tenantId, d.segmentId ?? null);
   const campaign = await prisma.campaign.create({
     data: {
@@ -88,6 +97,7 @@ campaignsRouter.post("/", requirePermission("campaigns.create"), async (req, res
       name: d.name,
       templateId: d.templateId,
       segmentId: d.segmentId ?? null,
+      phoneNumberId: sender?.phoneNumberId ?? "",
       status: d.scheduledAt ? "SCHEDULED" : "DRAFT",
       scheduledAt: d.scheduledAt ? new Date(d.scheduledAt) : null,
       totalCount: total,
