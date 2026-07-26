@@ -29,7 +29,7 @@ function statusBadge(t: Template): { label: string; cls: string; icon: React.Ele
   return { label: s.toLowerCase() || "draft", cls: "bg-muted text-muted-foreground", icon: FileText };
 }
 
-/** Media preview used by cards and the drawer preview. */
+/** Media preview used by the template cards. */
 function MediaThumb({ url, kind, className }: { url?: string | null; kind: string; className?: string }) {
   if (url && kind === "image") {
     // eslint-disable-next-line @next/next/no-img-element

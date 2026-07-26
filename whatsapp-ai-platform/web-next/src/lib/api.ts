@@ -71,6 +71,25 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
+/** Download an endpoint's response as a file, keeping the auth header. */
+export async function download(path: string, fallbackName: string) {
+  const token = getToken();
+  const res = await fetch(`/api${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, (data as { error?: string })?.error || `HTTP ${res.status}`);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
   get: <T>(p: string) => request<T>("GET", p),
   post: <T>(p: string, b?: unknown) => request<T>("POST", p, b),

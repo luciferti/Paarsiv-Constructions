@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import {
   Users, Folder as FolderIcon, FolderPlus, Plus, Filter, ChevronDown, ChevronRight,
   X, Search, Upload, Download, Trash2, SlidersHorizontal, Pencil, GitMerge, Loader2,
+  Tag as TagIcon, Archive,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, getSession } from "@/lib/api";
+import { api, download, getSession } from "@/lib/api";
 import type { Contact, ContactField, Folder, Segment } from "@/lib/types";
-import DateRangeFilter, { rangeQuery, type DateRange } from "@/components/DateRangeFilter";
+import DateRangeFilter, { rangeQuery, resolveRange, type DateRange } from "@/components/DateRangeFilter";
 import Pagination, { EMPTY_PAGE, type PageMeta } from "@/components/Pagination";
 
 const BASE_FIELDS: { v: string; label: string }[] = [
@@ -82,6 +83,9 @@ export default function ContactsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectAllMatching, setSelectAllMatching] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const csvRef = useRef<HTMLInputElement>(null);
 
@@ -99,6 +103,7 @@ export default function ContactsPage() {
         setContacts(r.contacts);
         setMeta({ total: r.total, page: r.page, pageSize: r.pageSize, pages: r.pages });
         setSelected(new Set());
+        setSelectAllMatching(false);
       })
       .catch(() => {});
   }, [search, activeSeg, range, page, pageSize]);
@@ -155,31 +160,53 @@ export default function ContactsPage() {
     loadContacts(); loadAll(); loadFields();
   }
 
-  function exportCsv() {
-    const cols = ["name", "phone", "city", "tags", ...fields.map((f) => f.key), "optedIn"];
-    const head = ["Name", "Phone", "City", "Tags", ...fields.map((f) => f.label), "Opt-in"];
-    const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const pool = selected.size ? contacts.filter((c) => selected.has(c.id)) : contacts;
-    const lines = [head.join(",")];
-    for (const c of pool) {
-      lines.push(cols.map((k) => {
-        if (k === "tags") return esc((c.tags || []).join(";"));
-        if (k === "optedIn") return c.optedIn ? "yes" : "no";
-        if (["name", "phone", "city"].includes(k)) return esc((c as unknown as Record<string, unknown>)[k]);
-        return esc(c.attributes?.[k]);
-      }).join(","));
+  /** The filter the server should apply — the same one driving the table. */
+  const filterBody = useCallback(() => {
+    const { from, to } = resolveRange(range);
+    return { search: search || undefined, segmentId: activeSeg || undefined, from, to };
+  }, [search, activeSeg, range]);
+
+  async function exportCsv() {
+    const p = new URLSearchParams();
+    if (search) p.set("search", search);
+    if (activeSeg) p.set("segmentId", activeSeg);
+    setBulkMsg("Preparing CSV…");
+    try {
+      await download(`/contacts/export?${p.toString()}${rangeQuery(range)}`, "contacts.csv");
+      setBulkMsg(null);
+    } catch (e) {
+      setBulkMsg(e instanceof Error ? e.message : "Export failed.");
     }
-    const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
-    const a = document.createElement("a");
-    a.href = url; a.download = `contacts-${Date.now()}.csv`; a.click();
-    URL.revokeObjectURL(url);
   }
 
-  // ---------- contacts ----------
+  // ---------- bulk actions ----------
+  async function runBulk(action: string, extra: Record<string, unknown> = {}) {
+    setBusy(true);
+    try {
+      const r = await api.post<{ affected: number }>("/contacts/bulk", {
+        ...(selectAllMatching ? { all: true, filter: filterBody() } : { ids: Array.from(selected) }),
+        action,
+        ...extra,
+      });
+      setBulkMsg(`${r.affected} contact${r.affected === 1 ? "" : "s"} updated.`);
+      setSelected(new Set());
+      setSelectAllMatching(false);
+      loadContacts(); loadAll(); loadSegments();
+    } catch (e) {
+      setBulkMsg(e instanceof Error ? e.message : "That bulk action failed.");
+    } finally { setBusy(false); }
+  }
+
+  const selectionCount = selectAllMatching ? total : selected.size;
+
+  async function bulkTag(action: "addTag" | "removeTag") {
+    const tag = prompt(action === "addTag" ? "Tag to add:" : "Tag to remove:");
+    if (!tag?.trim()) return;
+    await runBulk(action, { tag: tag.trim() });
+  }
   async function bulkDelete() {
-    if (!selected.size || !confirm(`Delete ${selected.size} contacts?`)) return;
-    for (const id of Array.from(selected)) await api.del(`/contacts/${id}`);
-    setSelected(new Set()); loadContacts(); loadAll();
+    if (!confirm(`Delete ${selectionCount} contacts? This cannot be undone.`)) return;
+    await runBulk("delete");
   }
 
   const headerName = activeSegment ? activeSegment.name : "All contacts";
@@ -390,12 +417,31 @@ export default function ContactsPage() {
         </div>
 
         {importMsg && <div className="px-6 py-2 text-xs text-primary bg-accent/60">{importMsg}</div>}
-        {selected.size > 0 && (
-          <div className="px-6 py-2 bg-accent flex items-center gap-3 text-sm">
-            <span className="font-medium text-accent-foreground">{selected.size} selected</span>
-            <button className={btnGhost} onClick={exportCsv}>Export</button>
-            {canEdit && <button className="h-8 px-3 rounded-lg bg-destructive text-white text-xs font-medium" onClick={bulkDelete}><Trash2 className="w-3 h-3 inline mr-1" />Delete</button>}
-            <button className={btnGhost} onClick={() => setSelected(new Set())}>Clear</button>
+        {bulkMsg && <div className="px-6 py-2 text-xs text-primary bg-accent/60">{bulkMsg}</div>}
+
+        {(selected.size > 0 || selectAllMatching) && (
+          <div className="px-6 py-2 bg-accent flex items-center gap-2 text-sm flex-wrap">
+            <span className="font-medium text-accent-foreground">
+              {busy && <Loader2 className="w-3.5 h-3.5 inline mr-1.5 animate-spin" />}
+              {selectionCount} selected
+            </span>
+            {!selectAllMatching && selected.size === contacts.length && total > contacts.length && (
+              <button className="text-xs text-primary underline underline-offset-2" onClick={() => setSelectAllMatching(true)}>
+                Select all {total} matching this filter
+              </button>
+            )}
+            {selectAllMatching && (
+              <span className="text-xs text-muted-foreground">everything matching the current filter</span>
+            )}
+            <div className="w-px h-5 bg-border mx-1" />
+            {canEdit && <button className={btnGhost} disabled={busy} onClick={() => bulkTag("addTag")}><TagIcon className="w-3 h-3 inline mr-1" />Add tag</button>}
+            {canEdit && <button className={btnGhost} disabled={busy} onClick={() => bulkTag("removeTag")}>Remove tag</button>}
+            {canEdit && <button className={btnGhost} disabled={busy} onClick={() => runBulk("optOut")}>Mark opted out</button>}
+            {canEdit && <button className={btnGhost} disabled={busy} onClick={() => runBulk("optIn")}>Mark opted in</button>}
+            {canEdit && <button className={btnGhost} disabled={busy} onClick={() => runBulk("status", { status: "archived" })}><Archive className="w-3 h-3 inline mr-1" />Archive</button>}
+            {canEdit && <button className="h-8 px-3 rounded-lg bg-destructive text-white text-xs font-medium disabled:opacity-50" disabled={busy} onClick={bulkDelete}><Trash2 className="w-3 h-3 inline mr-1" />Delete</button>}
+            <div className="flex-1" />
+            <button className={btnGhost} onClick={() => { setSelected(new Set()); setSelectAllMatching(false); }}>Clear</button>
           </div>
         )}
 
@@ -405,7 +451,15 @@ export default function ContactsPage() {
               <thead>
                 <tr className="text-left text-[11px] text-muted-foreground uppercase tracking-wide border-b bg-muted/40">
                   <th className="pl-4 pr-2 py-3 w-8">
-                    <input type="checkbox" checked={selected.size > 0 && selected.size === contacts.length} onChange={() => setSelected(selected.size === contacts.length ? new Set() : new Set(contacts.map((c) => c.id)))} />
+                    <input
+                      type="checkbox"
+                      checked={selectAllMatching || (selected.size > 0 && selected.size === contacts.length)}
+                      onChange={() => {
+                        const clearing = selectAllMatching || selected.size === contacts.length;
+                        setSelectAllMatching(false);
+                        setSelected(clearing ? new Set() : new Set(contacts.map((c) => c.id)));
+                      }}
+                    />
                   </th>
                   <th className="px-3 py-3 font-medium">Name</th>
                   <th className="px-3 py-3 font-medium">Phone</th>
@@ -419,7 +473,7 @@ export default function ContactsPage() {
                 {contacts.map((c) => (
                   <tr key={c.id} className={clsx("border-b last:border-0 hover:bg-muted/40", selected.has(c.id) && "bg-accent/50")}>
                     <td className="pl-4 pr-2 py-2.5">
-                      <input type="checkbox" checked={selected.has(c.id)} onChange={() => setSelected((p) => { const n = new Set(p); if (n.has(c.id)) { n.delete(c.id); } else { n.add(c.id); } return n; })} />
+                      <input type="checkbox" checked={selectAllMatching || selected.has(c.id)} onChange={() => { setSelectAllMatching(false); setSelected((p) => { const n = new Set(p); if (n.has(c.id)) { n.delete(c.id); } else { n.add(c.id); } return n; }); }} />
                     </td>
                     <td
                       className="px-3 py-2.5 font-medium text-primary hover:underline cursor-pointer"

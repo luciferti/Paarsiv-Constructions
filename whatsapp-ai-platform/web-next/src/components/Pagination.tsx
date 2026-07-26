@@ -20,7 +20,7 @@ interface Props {
   className?: string;
 }
 
-const SIZES = [25, 50, 100];
+const SIZES = [10, 25, 50, 100];
 
 /** Compact page numbers with ellipses: 1 … 4 5 6 … 20 */
 function pageList(current: number, total: number): (number | "…")[] {

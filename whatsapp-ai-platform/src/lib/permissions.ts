@@ -17,6 +17,7 @@ export const PERMISSIONS = [
   { key: "contacts.edit", group: "Contacts", label: "Add and edit contacts", desc: "Create contacts, edit fields and tags" },
   { key: "contacts.delete", group: "Contacts", label: "Delete contacts", desc: "Remove contacts permanently" },
   { key: "contacts.import", group: "Contacts", label: "Import and merge", desc: "CSV import and duplicate merging" },
+  { key: "contacts.export", group: "Contacts", label: "Export contacts", desc: "Download the contact list as CSV" },
   { key: "segments.manage", group: "Contacts", label: "Manage segments", desc: "Create, edit and delete segments and folders" },
   { key: "fields.manage", group: "Contacts", label: "Manage custom fields", desc: "Add or remove contact fields" },
 
@@ -52,7 +53,7 @@ export const ROLE_DEFAULTS: Record<Role, string[]> = {
   ADMIN: ALL_PERMISSIONS,
   RM: [
     "inbox.view", "inbox.reply", "inbox.assign", "inbox.notes",
-    "contacts.view", "contacts.edit", "contacts.delete", "contacts.import",
+    "contacts.view", "contacts.edit", "contacts.delete", "contacts.import", "contacts.export",
     "segments.manage", "fields.manage",
     "templates.view", "templates.manage", "media.manage",
     "campaigns.view", "campaigns.create", "campaigns.send", "journeys.manage",

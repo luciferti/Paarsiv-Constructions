@@ -55,6 +55,8 @@ export const openapiSpec = {
       post: { summary: "Create/upsert contact", responses: { "201": { description: "contact" } } },
     },
     "/contacts/import": { post: { summary: "Bulk import (≤5000)", responses: { "200": { description: "imported count" } } } },
+    "/contacts/bulk": { post: { summary: "Bulk tag, opt-in/out, archive or delete a selection or a whole filter", responses: { "200": { description: "affected count" } } } },
+    "/contacts/export": { get: { summary: "Export the current filter as CSV", responses: { "200": { description: "text/csv" } } } },
     "/segments": {
       get: { summary: "List segments with live counts", responses: { "200": { description: "segments[]" } } },
       post: { summary: "Create segment", responses: { "201": { description: "segment" } } },

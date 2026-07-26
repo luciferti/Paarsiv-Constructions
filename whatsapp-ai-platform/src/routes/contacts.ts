@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAuth, requirePermission } from "../middleware/auth";
+import { can } from "../lib/permissions";
 import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { audit } from "../lib/audit";
 import { findDuplicates, mergeContacts, mergeRulesOf, pickSurvivor } from "../services/merge";
@@ -11,20 +12,24 @@ import { pageMeta, parsePaging } from "../lib/pagination";
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
 
-/** GET /contacts — list with optional search + segment filter. */
-contactsRouter.get("/", async (req, res) => {
-  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
-  const segmentId = typeof req.query.segmentId === "string" ? req.query.segmentId : "";
+/**
+ * The list filter — search box, segment and date range — as a Prisma where.
+ * Bulk actions and CSV export reuse it so "select everything matching" means
+ * exactly what the user is looking at.
+ */
+async function listWhere(
+  tenantId: string,
+  q: { search?: string; segmentId?: string; from?: string; to?: string }
+): Promise<any> {
+  const search = (q.search || "").trim();
+  const created = dateFilter(parseRange({ query: q } as any));
+  let where: any = { tenantId, ...(created ? { createdAt: created } : {}) };
 
-  const created = dateFilter(parseRange(req));
-  let where = { tenantId: req.auth!.tenantId, ...(created ? { createdAt: created } : {}) } as any;
-  if (segmentId) {
-    const seg = await prisma.segment.findFirst({
-      where: { id: segmentId, tenantId: req.auth!.tenantId },
-    });
+  if (q.segmentId) {
+    const seg = await prisma.segment.findFirst({ where: { id: q.segmentId, tenantId } });
     if (seg) {
       // Keep the date filter alongside the segment rules.
-      const segWhere = segmentWhere(req.auth!.tenantId, seg.rules as unknown as SegmentRules);
+      const segWhere = segmentWhere(tenantId, seg.rules as unknown as SegmentRules);
       where = created ? { AND: [segWhere, { createdAt: created }] } : segWhere;
     }
   }
@@ -43,7 +48,21 @@ contactsRouter.get("/", async (req, res) => {
       ],
     };
   }
+  return where;
+}
 
+function queryFilter(req: any) {
+  return {
+    search: typeof req.query.search === "string" ? req.query.search : undefined,
+    segmentId: typeof req.query.segmentId === "string" ? req.query.segmentId : undefined,
+    from: typeof req.query.from === "string" ? req.query.from : undefined,
+    to: typeof req.query.to === "string" ? req.query.to : undefined,
+  };
+}
+
+/** GET /contacts — list with optional search + segment filter. */
+contactsRouter.get("/", async (req, res) => {
+  const where = await listWhere(req.auth!.tenantId, queryFilter(req));
   const paging = parsePaging(req, 25);
   const [contacts, total] = await Promise.all([
     prisma.contact.findMany({ where, orderBy: { createdAt: "desc" }, skip: paging.skip, take: paging.take }),
@@ -311,6 +330,146 @@ contactsRouter.get("/:id/360", async (req, res) => {
     inactiveDays: inactiveDays === 999 ? null : inactiveDays,
     fields,
   });
+});
+
+const bulkSchema = z.object({
+  // Either an explicit tick-list, or "everything the current filter matches".
+  ids: z.array(z.string()).optional(),
+  all: z.boolean().optional(),
+  filter: z.object({
+    search: z.string().optional(),
+    segmentId: z.string().optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+  }).optional(),
+  action: z.enum(["addTag", "removeTag", "optIn", "optOut", "status", "delete"]),
+  tag: z.string().optional(),
+  status: z.enum(["active", "blocked", "archived"]).optional(),
+});
+
+/** Resolve a bulk selection to concrete contact ids inside this tenant. */
+async function selectionIds(tenantId: string, body: z.infer<typeof bulkSchema>): Promise<string[]> {
+  if (body.all) {
+    const where = await listWhere(tenantId, body.filter || {});
+    const rows = await prisma.contact.findMany({ where, select: { id: true } });
+    return rows.map((r) => r.id);
+  }
+  if (!body.ids?.length) return [];
+  const rows = await prisma.contact.findMany({
+    where: { tenantId, id: { in: body.ids } },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
+/**
+ * POST /contacts/bulk — act on many contacts at once. Tagging reads each row
+ * because tags are an array column, so it runs in a transaction per chunk
+ * rather than one giant updateMany.
+ */
+contactsRouter.post("/bulk", requirePermission("contacts.edit"), async (req, res) => {
+  const parsed = bulkSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const body = parsed.data;
+  const tenantId = req.auth!.tenantId;
+
+  if ((body.action === "addTag" || body.action === "removeTag") && !body.tag?.trim()) {
+    return res.status(400).json({ error: "tag is required for this action" });
+  }
+  if (body.action === "status" && !body.status) {
+    return res.status(400).json({ error: "status is required for this action" });
+  }
+  if (body.action === "delete" && !can(req.auth!, "contacts.delete")) {
+    return res.status(403).json({ error: "contacts.delete permission required" });
+  }
+
+  const ids = await selectionIds(tenantId, body);
+  if (!ids.length) return res.json({ affected: 0 });
+
+  let affected = 0;
+  switch (body.action) {
+    case "delete":
+      affected = (await prisma.contact.deleteMany({ where: { tenantId, id: { in: ids } } })).count;
+      break;
+    case "optIn":
+    case "optOut":
+      affected = (await prisma.contact.updateMany({
+        where: { tenantId, id: { in: ids } },
+        data: { optedIn: body.action === "optIn" },
+      })).count;
+      break;
+    case "status":
+      affected = (await prisma.contact.updateMany({
+        where: { tenantId, id: { in: ids } },
+        data: { status: body.status },
+      })).count;
+      break;
+    default: {
+      const tag = body.tag!.trim();
+      const rows = await prisma.contact.findMany({
+        where: { tenantId, id: { in: ids } },
+        select: { id: true, tags: true },
+      });
+      const updates = rows
+        .map((r) => {
+          const next =
+            body.action === "addTag"
+              ? r.tags.includes(tag) ? null : [...r.tags, tag]
+              : r.tags.includes(tag) ? r.tags.filter((t) => t !== tag) : null;
+          return next ? prisma.contact.update({ where: { id: r.id }, data: { tags: next } }) : null;
+        })
+        .filter(Boolean) as any[];
+      for (let i = 0; i < updates.length; i += 200) {
+        await prisma.$transaction(updates.slice(i, i + 200));
+      }
+      affected = updates.length;
+    }
+  }
+
+  audit(req, `contacts.bulk.${body.action}`, { meta: { affected, tag: body.tag, status: body.status } });
+  res.json({ affected });
+});
+
+const CSV_COLUMNS = [
+  ["phone", "Phone"], ["name", "Name"], ["email", "Email"], ["company", "Company"],
+  ["jobTitle", "Job title"], ["city", "City"], ["country", "Country"],
+  ["timezone", "Timezone"], ["language", "Language"], ["externalId", "External ID"],
+  ["status", "Status"], ["optedIn", "Opted in"], ["source", "Source"], ["createdAt", "Created"],
+] as const;
+
+function csvCell(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  const s = v instanceof Date ? v.toISOString() : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/**
+ * GET /contacts/export — the current filter as CSV, custom fields included.
+ * Excel reads the leading BOM as UTF-8, which keeps non-Latin names intact.
+ */
+contactsRouter.get("/export", requirePermission("contacts.export"), async (req, res) => {
+  const tenantId = req.auth!.tenantId;
+  const where = await listWhere(tenantId, queryFilter(req));
+  const [rows, fields] = await Promise.all([
+    prisma.contact.findMany({ where, orderBy: { createdAt: "desc" }, take: 50_000 }),
+    prisma.contactField.findMany({ where: { tenantId }, orderBy: { createdAt: "asc" } }),
+  ]);
+
+  const header = [...CSV_COLUMNS.map(([, l]) => l), ...fields.map((f) => f.label), "Tags"];
+  const lines = [header.map(csvCell).join(",")];
+  for (const c of rows) {
+    const attrs = (c.attributes as Record<string, unknown> | null) || {};
+    lines.push([
+      ...CSV_COLUMNS.map(([k]) => csvCell((c as any)[k])),
+      ...fields.map((f) => csvCell(attrs[f.key])),
+      csvCell((c.tags || []).join(" | ")),
+    ].join(","));
+  }
+
+  audit(req, "contacts.export", { meta: { count: rows.length } });
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="contacts-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send("﻿" + lines.join("\n"));
 });
 
 /** GET /contacts/duplicates — duplicate groups per the tenant's merge rules. */
