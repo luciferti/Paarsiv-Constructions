@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
-import type { Contact, ContactField, Folder, SegCondition, SegOp, Segment } from "@/lib/types";
+import type { Contact, ContactField, Folder, Segment } from "@/lib/types";
 import DateRangeFilter, { rangeQuery, type DateRange } from "@/components/DateRangeFilter";
 import Pagination, { EMPTY_PAGE, type PageMeta } from "@/components/Pagination";
 
@@ -20,17 +20,6 @@ const BASE_FIELDS: { v: string; label: string }[] = [
   { v: "email", label: "Email" },
   { v: "optedIn", label: "Opted in" },
 ];
-
-function opsFor(field: string): { v: SegOp; label: string }[] {
-  if (field === "tag") return [{ v: "has", label: "has" }];
-  if (field === "optedIn") return [{ v: "equals", label: "is" }];
-  return [
-    { v: "contains", label: "contains" },
-    { v: "equals", label: "equals" },
-    { v: "not_equals", label: "not equals" },
-    { v: "is_set", label: "is set" },
-  ];
-}
 
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -73,16 +62,6 @@ const inputCls = "w-full h-9 px-3 rounded-lg border bg-background text-sm outlin
 const btnPri = "h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 disabled:opacity-50";
 const btnGhost = "h-8 px-3 rounded-lg border text-xs font-medium hover:bg-muted";
 
-type DrawerKind = null | "segment" | "fields" | "add" | "dupes";
-
-interface DupGroup {
-  reason: string;
-  field?: string;
-  key: string;
-  suggestedPrimaryId: string;
-  contacts: Contact[];
-}
-
 export default function ContactsPage() {
   const router = useRouter();
   const session = typeof window !== "undefined" ? getSession() : null;
@@ -103,28 +82,11 @@ export default function ContactsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [drawer, setDrawer] = useState<DrawerKind>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const csvRef = useRef<HTMLInputElement>(null);
 
-  // segment builder state
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [segName, setSegName] = useState("");
-  const [segFolder, setSegFolder] = useState("");
-  const [match, setMatch] = useState<"all" | "any">("all");
-  const [conds, setConds] = useState<SegCondition[]>([{ field: "city", op: "equals", value: "" }]);
-  const [previewCount, setPreviewCount] = useState<number | null>(null);
 
-  // add-contact + fields state
-  const [form, setForm] = useState({ phone: "", name: "", city: "", tags: "" });
-  const [formAttrs, setFormAttrs] = useState<Record<string, string>>({});
-  const [newField, setNewField] = useState("");
 
-  // duplicate merge
-  const [dupGroups, setDupGroups] = useState<DupGroup[] | null>(null);
-  const [dupLoading, setDupLoading] = useState(false);
-  const [primaries, setPrimaries] = useState<Record<number, string>>({});
-  const [merging, setMerging] = useState<number | null>(null);
 
   const loadContacts = useCallback(() => {
     const p = new URLSearchParams();
@@ -158,7 +120,6 @@ export default function ContactsPage() {
   useEffect(loadContacts, [loadContacts]);
 
   const activeSegment = segments.find((s) => s.id === activeSeg) || null;
-  const fieldOptions = [...BASE_FIELDS, ...fields.map((f) => ({ v: `attr:${f.key}`, label: f.label }))];
 
   const grouped = useMemo(() => {
     const byFolder = new Map<string, Segment[]>();
@@ -169,72 +130,6 @@ export default function ContactsPage() {
     }
     return { byFolder, ungrouped };
   }, [segments]);
-
-  // ---------- segment builder ----------
-  function openNewSegment() {
-    setEditingId(null); setSegName(""); setSegFolder(activeSegment?.folderId || "");
-    setMatch("all"); setConds([{ field: "city", op: "equals", value: "" }]);
-    setPreviewCount(null); setDrawer("segment");
-  }
-  function openEditSegment(s: Segment) {
-    setEditingId(s.id); setSegName(s.name); setSegFolder(s.folderId || "");
-    setMatch(s.rules.match);
-    setConds(s.rules.conditions.length ? s.rules.conditions : [{ field: "city", op: "equals", value: "" }]);
-    setPreviewCount(s.count); setDrawer("segment");
-  }
-  function updateCond(i: number, patch: Partial<SegCondition>) {
-    setConds((prev) => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
-  }
-  const cleanRules = () => ({ match, conditions: conds.filter((c) => c.op === "is_set" || c.value !== "") });
-  async function preview() {
-    const r = await api.post<{ count: number }>("/segments/preview", { rules: cleanRules() });
-    setPreviewCount(r.count);
-  }
-  async function saveSegment() {
-    if (!segName.trim()) return;
-    const body = { name: segName.trim(), rules: cleanRules(), folderId: segFolder || null };
-    if (editingId) await api.patch(`/segments/${editingId}`, body);
-    else await api.post("/segments", body);
-    setDrawer(null); loadSegments();
-  }
-  async function deleteSegment(id: string) {
-    await api.del(`/segments/${id}`);
-    if (activeSeg === id) setActiveSeg("");
-    setDrawer(null); loadSegments();
-  }
-
-  // ---------- duplicate merge ----------
-  async function openDupes() {
-    setDrawer("dupes");
-    setDupLoading(true);
-    try {
-      const r = await api.get<{ groups: DupGroup[] }>("/contacts/duplicates");
-      setDupGroups(r.groups);
-      const pre: Record<number, string> = {};
-      r.groups.forEach((g, i) => { pre[i] = g.suggestedPrimaryId; });
-      setPrimaries(pre);
-    } finally {
-      setDupLoading(false);
-    }
-  }
-  async function mergeGroup(i: number) {
-    if (!dupGroups) return;
-    const g = dupGroups[i];
-    const primaryId = primaries[i] || g.suggestedPrimaryId;
-    const duplicateIds = g.contacts.filter((c) => c.id !== primaryId).map((c) => c.id);
-    setMerging(i);
-    try {
-      await api.post("/contacts/merge", { primaryId, duplicateIds });
-      const r = await api.get<{ groups: DupGroup[] }>("/contacts/duplicates");
-      setDupGroups(r.groups);
-      const pre: Record<number, string> = {};
-      r.groups.forEach((g2, idx) => { pre[idx] = g2.suggestedPrimaryId; });
-      setPrimaries(pre);
-      loadContacts(); loadAll();
-    } finally {
-      setMerging(null);
-    }
-  }
 
   // ---------- csv ----------
   async function importCsv(file: File) {
@@ -281,21 +176,6 @@ export default function ContactsPage() {
   }
 
   // ---------- contacts ----------
-  async function addContact() {
-    const phone = form.phone.replace(/[^\d]/g, "");
-    if (!phone) return;
-    const attributes: Record<string, string> = {};
-    for (const f of fields) if (formAttrs[f.key]?.trim()) attributes[f.key] = formAttrs[f.key].trim();
-    await api.post("/contacts", {
-      phone,
-      name: form.name || undefined,
-      city: form.city || undefined,
-      tags: form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-      attributes,
-    });
-    setForm({ phone: "", name: "", city: "", tags: "" }); setFormAttrs({}); setDrawer(null);
-    loadContacts(); loadAll();
-  }
   async function bulkDelete() {
     if (!selected.size || !confirm(`Delete ${selected.size} contacts?`)) return;
     for (const id of Array.from(selected)) await api.del(`/contacts/${id}`);
@@ -359,7 +239,7 @@ export default function ContactsPage() {
                 className="w-4 h-4 cursor-pointer hover:text-primary"
                 onClick={(e) => { e.stopPropagation(); const n = prompt("Folder name:"); if (n?.trim()) api.post("/segment-folders", { name: n.trim() }).then(loadFolders); }}
               />
-              <Plus className="w-4 h-4 cursor-pointer hover:text-primary" onClick={(e) => { e.stopPropagation(); openNewSegment(); }} />
+              <Plus className="w-4 h-4 cursor-pointer hover:text-primary" onClick={(e) => { e.stopPropagation(); router.push("/contacts/segments/new"); }} />
             </span>
           )}
         </div>
@@ -393,7 +273,7 @@ export default function ContactsPage() {
 
         {canEdit && (
           <div className="border-t pt-2 space-y-0.5">
-            <button onClick={() => setDrawer("fields")} className="w-full flex items-center gap-2 h-8 px-3 rounded-lg text-[13px] text-muted-foreground hover:bg-muted">
+            <button onClick={() => router.push('/contacts/fields')} className="w-full flex items-center gap-2 h-8 px-3 rounded-lg text-[13px] text-muted-foreground hover:bg-muted">
               <SlidersHorizontal className="w-4 h-4" /> Custom fields
             </button>
             <button onClick={() => csvRef.current?.click()} className="w-full flex items-center gap-2 h-8 px-3 rounded-lg text-[13px] text-muted-foreground hover:bg-muted">
@@ -417,7 +297,7 @@ export default function ContactsPage() {
                 <p className="text-xs text-muted-foreground mt-0.5">Saved audience filters — click one to see its contacts</p>
               </div>
               <div className="flex-1" />
-              {canEdit && <button className={btnPri} onClick={openNewSegment}><Plus className="w-3 h-3 inline mr-1" />Create segment</button>}
+              {canEdit && <button className={btnPri} onClick={() => router.push('/contacts/segments/new')}><Plus className="w-3 h-3 inline mr-1" />Create segment</button>}
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
               {folders.map((f) => {
@@ -438,7 +318,7 @@ export default function ContactsPage() {
                           <div className="flex items-center gap-2 mt-3">
                             <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent text-accent-foreground font-medium">{s.count} contacts</span>
                             <div className="flex-1" />
-                            {canEdit && <button className={btnGhost} onClick={() => openEditSegment(s)}>Edit</button>}
+                            {canEdit && <button className={btnGhost} onClick={() => router.push(`/contacts/segments/${s.id}`)}>Edit</button>}
                           </div>
                         </div>
                       ))}
@@ -459,7 +339,7 @@ export default function ContactsPage() {
                         <div className="flex items-center gap-2 mt-3">
                           <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent text-accent-foreground font-medium">{s.count} contacts</span>
                           <div className="flex-1" />
-                          {canEdit && <button className={btnGhost} onClick={() => openEditSegment(s)}>Edit</button>}
+                          {canEdit && <button className={btnGhost} onClick={() => router.push(`/contacts/segments/${s.id}`)}>Edit</button>}
                         </div>
                       </div>
                     ))}
@@ -469,7 +349,7 @@ export default function ContactsPage() {
               {segments.length === 0 && (
                 <div className="text-center py-16">
                   <p className="text-sm text-muted-foreground mb-3">No segments yet.</p>
-                  {canEdit && <button className={btnPri} onClick={openNewSegment}><Plus className="w-3 h-3 inline mr-1" />Create your first segment</button>}
+                  {canEdit && <button className={btnPri} onClick={() => router.push('/contacts/segments/new')}><Plus className="w-3 h-3 inline mr-1" />Create your first segment</button>}
                 </div>
               )}
             </div>
@@ -487,7 +367,7 @@ export default function ContactsPage() {
           </div>
           <div className="flex-1" />
           {activeSegment && canEdit && (
-            <button className={btnGhost} onClick={() => openEditSegment(activeSegment)}>
+            <button className={btnGhost} onClick={() => router.push(`/contacts/segments/${activeSegment.id}`)}>
               <Pencil className="w-3 h-3 inline mr-1" />Edit filter
             </button>
           )}
@@ -500,10 +380,10 @@ export default function ContactsPage() {
           </div>
           <div className="flex-1" />
           <DateRangeFilter value={range} onChange={setRange} />
-          {canEdit && <button className={btnGhost} onClick={openDupes}><GitMerge className="w-3 h-3 inline mr-1" />Find duplicates</button>}
+          {canEdit && <button className={btnGhost} onClick={() => router.push('/contacts/duplicates')}><GitMerge className="w-3 h-3 inline mr-1" />Find duplicates</button>}
           <button className={btnGhost} onClick={exportCsv}><Download className="w-3 h-3 inline mr-1" />Export</button>
           {canEdit && (
-            <button className={btnPri} onClick={() => { setForm({ phone: "", name: "", city: "", tags: "" }); setFormAttrs({}); setDrawer("add"); }}>
+            <button className={btnPri} onClick={() => router.push('/contacts/new')}>
               + Add contact
             </button>
           )}
@@ -575,168 +455,6 @@ export default function ContactsPage() {
         </>)}
       </section>
 
-      {/* Drawer */}
-      {drawer && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex justify-end" onClick={() => setDrawer(null)}>
-          <div className="w-[420px] max-w-[92vw] h-full bg-card border-l flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b flex items-center justify-between">
-              <span className="font-semibold">
-                {drawer === "segment" ? (editingId ? "Edit segment" : "New segment")
-                  : drawer === "fields" ? "Custom fields"
-                  : drawer === "dupes" ? "Duplicate contacts"
-                  : "Add contact"}
-              </span>
-              <button onClick={() => setDrawer(null)} className="p-1.5 rounded-md hover:bg-muted"><X className="w-4 h-4" /></button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5 space-y-3 text-sm">
-              {drawer === "segment" && (
-                <>
-                  <div>
-                    <label className="text-xs text-muted-foreground">Name</label>
-                    <input className={clsx(inputCls, "mt-1")} value={segName} onChange={(e) => setSegName(e.target.value)} placeholder="e.g. Bengaluru leads" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground">Folder</label>
-                    <select className={clsx(inputCls, "mt-1")} value={segFolder} onChange={(e) => setSegFolder(e.target.value)}>
-                      <option value="">No folder</option>
-                      {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
-                    Match
-                    <select className="h-8 px-2 rounded-lg border bg-background" value={match} onChange={(e) => setMatch(e.target.value as "all" | "any")}>
-                      <option value="all">all</option><option value="any">any</option>
-                    </select>
-                    of these conditions
-                  </div>
-                  {conds.map((c, i) => (
-                    <div key={i} className="flex gap-2 items-center flex-wrap">
-                      <select
-                        className="h-9 px-2 rounded-lg border bg-background text-sm"
-                        value={c.field}
-                        onChange={(e) => { const field = e.target.value; updateCond(i, { field, op: opsFor(field)[0].v, value: field === "optedIn" ? "true" : "" }); }}
-                      >
-                        {fieldOptions.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
-                      </select>
-                      <select className="h-9 px-2 rounded-lg border bg-background text-sm" value={c.op} onChange={(e) => updateCond(i, { op: e.target.value as SegOp })}>
-                        {opsFor(c.field).map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
-                      </select>
-                      {c.op !== "is_set" && (c.field === "optedIn" ? (
-                        <select className="h-9 px-2 rounded-lg border bg-background text-sm" value={String(c.value)} onChange={(e) => updateCond(i, { value: e.target.value })}>
-                          <option value="true">yes</option><option value="false">no</option>
-                        </select>
-                      ) : (
-                        <input className="h-9 px-3 rounded-lg border bg-background text-sm flex-1 min-w-24" value={typeof c.value === "string" ? c.value : ""} placeholder="value" onChange={(e) => updateCond(i, { value: e.target.value })} />
-                      ))}
-                      {conds.length > 1 && <button className={btnGhost} onClick={() => setConds((p) => p.filter((_, idx) => idx !== i))}>×</button>}
-                    </div>
-                  ))}
-                  <div className="flex items-center gap-2 pt-1">
-                    <button className={btnGhost} onClick={() => setConds((p) => [...p, { field: "tag", op: "has", value: "" }])}>+ condition</button>
-                    <button className={btnPri} onClick={preview}>Preview</button>
-                    {previewCount !== null && <span className="text-xs text-primary font-medium">{previewCount} contacts match</span>}
-                  </div>
-                </>
-              )}
-
-              {drawer === "fields" && (
-                <>
-                  <p className="text-xs text-muted-foreground">Your own fields appear on contacts, import, table columns and segments.</p>
-                  {fields.map((f) => (
-                    <div key={f.id} className="flex items-center justify-between py-2 border-b">
-                      <span>{f.label}</span>
-                      <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive cursor-pointer" onClick={() => api.del(`/contact-fields/${f.id}`).then(loadFields)} />
-                    </div>
-                  ))}
-                  {fields.length === 0 && <p className="text-xs text-muted-foreground">No custom fields yet.</p>}
-                  <div className="flex gap-2 pt-2">
-                    <input className={inputCls} placeholder="New field, e.g. Budget" value={newField} onChange={(e) => setNewField(e.target.value)} />
-                    <button className={btnPri} disabled={!newField.trim()} onClick={() => api.post("/contact-fields", { label: newField.trim(), type: "text" }).then(() => { setNewField(""); loadFields(); })}>Add</button>
-                  </div>
-                </>
-              )}
-
-              {drawer === "dupes" && (
-                <>
-                  {dupLoading && <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Scanning…</div>}
-                  {!dupLoading && dupGroups && dupGroups.length === 0 && (
-                    <p className="text-sm text-muted-foreground">No duplicates found with the current rules. Adjust them in Settings → Merge rules.</p>
-                  )}
-                  {!dupLoading && dupGroups?.map((g, i) => (
-                    <div key={`${g.reason}-${g.key}`} className="rounded-xl border bg-muted/30 p-3 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent text-accent-foreground font-medium capitalize">
-                          {g.reason === "customField" ? `field: ${g.field}` : g.reason === "nameCity" ? "name + city" : g.reason}
-                        </span>
-                        <span className="text-[11px] text-muted-foreground truncate">{g.key}</span>
-                      </div>
-                      {g.contacts.map((c) => (
-                        <label key={c.id} className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2 cursor-pointer">
-                          <input
-                            type="radio"
-                            name={`primary-${i}`}
-                            checked={(primaries[i] || g.suggestedPrimaryId) === c.id}
-                            onChange={() => setPrimaries({ ...primaries, [i]: c.id })}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="text-sm font-medium truncate">
-                              {c.name || "Unknown"}
-                              {c.id === g.suggestedPrimaryId && <span className="ml-2 text-[10px] text-primary font-semibold">suggested</span>}
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate">+{c.phone}{c.email ? ` · ${c.email}` : ""}{c.city ? ` · ${c.city}` : ""}</div>
-                          </div>
-                        </label>
-                      ))}
-                      <p className="text-[11px] text-muted-foreground">Selected record survives; others merge into it (empty fields filled, tags combined, numbers absorbed).</p>
-                      <button className={btnPri} disabled={merging === i} onClick={() => mergeGroup(i)}>
-                        {merging === i ? "Merging…" : `Merge ${g.contacts.length} contacts`}
-                      </button>
-                    </div>
-                  ))}
-                </>
-              )}
-
-              {drawer === "add" && (
-                <>
-                  {[
-                    { k: "phone", label: "Phone", ph: "91…" },
-                    { k: "name", label: "Name", ph: "" },
-                    { k: "city", label: "City", ph: "" },
-                    { k: "tags", label: "Tags (comma separated)", ph: "lead, villa" },
-                  ].map((f) => (
-                    <div key={f.k}>
-                      <label className="text-xs text-muted-foreground">{f.label}</label>
-                      <input
-                        className={clsx(inputCls, "mt-1")}
-                        placeholder={f.ph}
-                        value={form[f.k as keyof typeof form]}
-                        onChange={(e) => setForm({ ...form, [f.k]: e.target.value })}
-                      />
-                    </div>
-                  ))}
-                  {fields.map((f) => (
-                    <div key={f.id}>
-                      <label className="text-xs text-muted-foreground">{f.label}</label>
-                      <input className={clsx(inputCls, "mt-1")} value={formAttrs[f.key] || ""} onChange={(e) => setFormAttrs({ ...formAttrs, [f.key]: e.target.value })} />
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-
-            <div className="px-5 py-3.5 border-t flex items-center gap-2">
-              {drawer === "segment" && editingId && (
-                <button className="h-8 px-3 rounded-lg bg-destructive text-white text-xs font-medium" onClick={() => deleteSegment(editingId)}>Delete</button>
-              )}
-              <div className="flex-1" />
-              <button className={btnGhost} onClick={() => setDrawer(null)}>Cancel</button>
-              {drawer === "segment" && <button className={btnPri} disabled={!segName.trim()} onClick={saveSegment}>{editingId ? "Save" : "Create"}</button>}
-              {drawer === "add" && <button className={btnPri} disabled={!form.phone.trim()} onClick={addContact}>Save</button>}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
