@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FlaskConical, MessageSquare, Pause, Play, Timer, Trash2, UserCheck, Tag as TagIcon } from "lucide-react";
+import { FlaskConical, MessageSquare, Pause, Play, Rocket, Timer, Trash2, UserCheck, Users, Tag as TagIcon, Zap } from "lucide-react";
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
 import type { Journey, JourneyStep } from "@/lib/types";
@@ -25,6 +25,11 @@ export default function JourneysPage() {
   async function toggle(j: Journey) {
     await api.patch(`/journeys/${j.id}/status`, { status: j.status === "ACTIVE" ? "DRAFT" : "ACTIVE" });
     load();
+  }
+  async function runSegment(j: Journey) {
+    if (!confirm(`Enroll everyone in this journey's segment now?`)) return;
+    const r = await api.post<{ enrolled: number }>(`/journeys/${j.id}/run`);
+    alert(`Enrolled ${r.enrolled} contacts into “${j.name}”.`);
   }
   async function test(j: Journey) {
     const phone = prompt("Test phone (91…):", "919999888777");
@@ -49,7 +54,11 @@ export default function JourneysPage() {
           <div key={j.id} className="rounded-xl border bg-card shadow-card p-5">
             <div className="flex items-center gap-3">
               <span className="font-semibold">{j.name}</span>
-              <span className="text-xs text-muted-foreground">trigger: keyword “{j.triggerValue}”</span>
+              <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                {j.triggerType === "segment" ? <><Users className="w-3 h-3" />segment entry</>
+                  : j.triggerType === "new_contact" ? <><Zap className="w-3 h-3" />every new contact</>
+                  : <><Zap className="w-3 h-3" />keyword “{j.triggerValue}”</>}
+              </span>
               <span className={clsx(
                 "text-[11px] px-2 py-0.5 rounded-full font-medium",
                 j.status === "ACTIVE" ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"
@@ -60,6 +69,11 @@ export default function JourneysPage() {
               {canEdit && (
                 <>
                   <button className={btnGhost} onClick={() => router.push(`/journeys/${j.id}`)}>Edit</button>
+                  {j.triggerType === "segment" && (
+                    <button className={btnGhost} onClick={() => runSegment(j)}>
+                      <Rocket className="w-3 h-3 inline mr-1" />Run now
+                    </button>
+                  )}
                   <button className={btnGhost} onClick={() => test(j)}>
                     <FlaskConical className="w-3 h-3 inline mr-1" />Test
                   </button>

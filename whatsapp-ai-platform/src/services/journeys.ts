@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { fillTokens } from "../lib/tokens";
 import { sendOutbound } from "./outbound";
 import type { Tenant } from "@prisma/client";
@@ -208,6 +209,65 @@ export async function runJourneyGraph(
   }
 
   return { executed, messages };
+}
+
+/**
+ * Enroll every opted-in contact of a journey's segment (entry source =
+ * segment) and run the flow for each. Returns how many were enrolled.
+ */
+export async function runJourneyForSegment(
+  tenant: Tenant,
+  journey: { id: string; nodes: unknown; edges: unknown; triggerValue: string | null }
+): Promise<{ enrolled: number }> {
+  const segmentId = journey.triggerValue;
+  if (!segmentId) return { enrolled: 0 };
+
+  const segment = await prisma.segment.findFirst({
+    where: { id: segmentId, tenantId: tenant.id },
+  });
+  if (!segment) return { enrolled: 0 };
+
+  const where = {
+    AND: [
+      segmentWhere(tenant.id, segment.rules as unknown as SegmentRules),
+      { optedIn: true },
+    ],
+  };
+  const contacts = await prisma.contact.findMany({ where, take: 5000 });
+
+  const nodes = (journey.nodes as GraphNodeLike[]) || [];
+  const edges = (journey.edges as GraphEdgeLike[]) || [];
+  if (nodes.length === 0) return { enrolled: 0 };
+
+  for (const c of contacts) {
+    // Sequential so a big segment doesn't hammer the send path.
+    await runJourneyGraph(tenant, nodes, edges, { phone: c.phone, name: c.name }).catch((e) =>
+      console.error("[journey] segment run error:", e?.message || e)
+    );
+  }
+  return { enrolled: contacts.length };
+}
+
+/**
+ * Run any ACTIVE journeys whose entry source is "new contact". Called when a
+ * contact is created from an inbound message.
+ */
+export async function triggerNewContactJourneys(
+  tenant: Tenant,
+  phone: string,
+  name?: string
+): Promise<void> {
+  const journeys = await prisma.journey.findMany({
+    where: { tenantId: tenant.id, status: "ACTIVE", triggerType: "new_contact" },
+  });
+  for (const j of journeys) {
+    const nodes = (j.nodes as unknown as GraphNodeLike[]) || [];
+    if (!nodes.length) continue;
+    const edges = (j.edges as unknown as GraphEdgeLike[]) || [];
+    runJourneyGraph(tenant, nodes, edges, { phone, name }).catch((e) =>
+      console.error("[journey] new-contact run error:", e?.message || e)
+    );
+  }
 }
 
 /**

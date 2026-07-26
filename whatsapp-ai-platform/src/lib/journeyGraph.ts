@@ -73,6 +73,8 @@ export function graphToSteps(nodes: GraphNode[], edges: GraphEdge[]): JourneySte
 export function triggerOf(nodes: GraphNode[]): { triggerType: string; triggerValue: string | null } {
   const t = (nodes || []).find((n) => (n.data?.kind ?? n.type) === "trigger");
   const type = typeof t?.data?.triggerType === "string" ? (t.data.triggerType as string) : "keyword";
-  const value = typeof t?.data?.triggerValue === "string" ? (t.data.triggerValue as string) : null;
+  // For segment entry sources the value is the segment id.
+  const raw = type === "segment" ? t?.data?.segmentId : t?.data?.triggerValue;
+  const value = typeof raw === "string" && raw ? raw : null;
   return { triggerType: type, triggerValue: value };
 }

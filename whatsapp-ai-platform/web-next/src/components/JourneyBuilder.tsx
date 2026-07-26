@@ -9,11 +9,11 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import {
-  ArrowLeft, GitBranch, Loader2, MessageSquare, Plus, Tag as TagIcon, Timer, Trash2, UserCheck, Zap,
+  ArrowLeft, GitBranch, Loader2, MessageSquare, Plus, Tag as TagIcon, Timer, Trash2, UserCheck, Users, Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
-import type { Journey, Template } from "@/lib/types";
+import type { Journey, Segment, Template } from "@/lib/types";
 
 type Kind = "trigger" | "message" | "wait" | "handoff" | "tag" | "condition";
 
@@ -26,6 +26,8 @@ interface NodeData {
   templateId?: string;
   hours?: number;
   tag?: string;
+  segmentId?: string; // trigger: entry segment
+  segmentName?: string;
   check?: string;   // condition: has_tag | text_contains | replied | opted_in
   value?: string;   // condition value
 }
@@ -48,6 +50,12 @@ const META: Record<Kind, { icon: React.ElementType; label: string; ring: string;
   condition: { icon: GitBranch, label: "Condition", ring: "border-warning/50", badge: "bg-warning/15 text-warning" },
 };
 
+const ENTRY_SOURCES: { v: string; label: string; desc: string }[] = [
+  { v: "keyword", label: "Keyword", desc: "A customer message contains a word" },
+  { v: "segment", label: "Segment", desc: "Everyone in a saved segment" },
+  { v: "new_contact", label: "New contact", desc: "Someone messages for the first time" },
+];
+
 const CHECKS: { v: string; label: string; needsValue: boolean }[] = [
   { v: "has_tag", label: "Contact has tag", needsValue: true },
   { v: "text_contains", label: "Their message contains", needsValue: true },
@@ -60,7 +68,12 @@ function FlowNode({ data, selected }: NodeProps<NodeData>) {
   const meta = META[data.kind] || META.message;
   const Icon = meta.icon;
   const summary =
-    data.kind === "trigger" ? (data.triggerValue ? `keyword: “${data.triggerValue}”` : "set a keyword")
+    data.kind === "trigger"
+      ? data.triggerType === "segment"
+        ? (data.segmentName ? `segment: ${data.segmentName}` : "pick a segment")
+        : data.triggerType === "new_contact"
+          ? "when a new contact messages"
+          : (data.triggerValue ? `keyword: “${data.triggerValue}”` : "set a keyword")
     : data.kind === "message" ? (data.text?.slice(0, 42) || "write a message")
     : data.kind === "wait" ? `${data.hours ?? 0} hours`
     : data.kind === "handoff" ? "conversation goes to a human"
@@ -112,6 +125,7 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
 
   const [name, setName] = useState("");
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [segments, setSegments] = useState<Segment[]>([]);
   const [loading, setLoading] = useState(!!journeyId);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -126,6 +140,7 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
 
   useEffect(() => {
     api.get<{ templates: Template[] }>("/templates").then((r) => setTemplates(r.templates)).catch(() => {});
+    api.get<{ segments: Segment[] }>("/segments").then((r) => setSegments(r.segments)).catch(() => {});
     if (!journeyId) return;
     api.get<{ journeys: Journey[] }>("/journeys")
       .then((r) => {
@@ -240,7 +255,9 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
     setErr(null);
     if (!name.trim()) { setErr("Give the journey a name."); return; }
     const trigger = nodes.find((n) => n.data.kind === "trigger");
-    if (!trigger?.data.triggerValue?.trim()) { setErr("Set a trigger keyword."); return; }
+    const entry = trigger?.data.triggerType || "keyword";
+    if (entry === "keyword" && !trigger?.data.triggerValue?.trim()) { setErr("Set a trigger keyword."); return; }
+    if (entry === "segment" && !trigger?.data.segmentId) { setErr("Pick the entry segment."); return; }
     setSaving(true);
     const payload = {
       name: name.trim(),
@@ -356,11 +373,54 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
               {selected.data.kind === "trigger" && (
                 <>
                   <div>
-                    <label className="text-xs text-muted-foreground">Start when a message contains</label>
-                    <input className={clsx(input, "mt-1")} value={selected.data.triggerValue || ""} placeholder="brochure"
-                      onChange={(e) => updateSelected({ triggerValue: e.target.value })} />
+                    <label className="text-xs text-muted-foreground">Entry source</label>
+                    <div className="mt-1.5 space-y-1.5">
+                      {ENTRY_SOURCES.map((es) => {
+                        const on = (selected.data.triggerType || "keyword") === es.v;
+                        return (
+                          <button key={es.v}
+                            onClick={() => updateSelected({ triggerType: es.v })}
+                            className={clsx("w-full text-left rounded-lg border-2 px-3 py-2 transition-colors",
+                              on ? "border-primary bg-accent" : "hover:bg-muted/60")}>
+                            <div className="text-[13px] font-medium">{es.label}</div>
+                            <div className="text-[10px] text-muted-foreground">{es.desc}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">The journey runs instead of the usual AI reply when this keyword appears.</p>
+
+                  {(selected.data.triggerType || "keyword") === "keyword" && (
+                    <div>
+                      <label className="text-xs text-muted-foreground">Message contains</label>
+                      <input className={clsx(input, "mt-1")} value={selected.data.triggerValue || ""} placeholder="brochure"
+                        onChange={(e) => updateSelected({ triggerValue: e.target.value })} />
+                      <p className="text-[11px] text-muted-foreground mt-1.5">Runs instead of the usual AI reply when this word appears.</p>
+                    </div>
+                  )}
+
+                  {selected.data.triggerType === "segment" && (
+                    <div>
+                      <label className="text-xs text-muted-foreground">Segment</label>
+                      <select className={clsx(input, "mt-1")} value={selected.data.segmentId || ""}
+                        onChange={(e) => {
+                          const seg = segments.find((x) => x.id === e.target.value);
+                          updateSelected({ segmentId: e.target.value, segmentName: seg?.name });
+                        }}>
+                        <option value="">— pick a segment —</option>
+                        {segments.map((sg) => <option key={sg.id} value={sg.id}>{sg.name} ({sg.count})</option>)}
+                      </select>
+                      <p className="text-[11px] text-muted-foreground mt-1.5">
+                        Save, then use <b className="text-foreground">Run now</b> on the journeys list to enroll everyone in this segment.
+                      </p>
+                    </div>
+                  )}
+
+                  {selected.data.triggerType === "new_contact" && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Runs once for every person who messages you for the first time, while the journey is active.
+                    </p>
+                  )}
                 </>
               )}
 

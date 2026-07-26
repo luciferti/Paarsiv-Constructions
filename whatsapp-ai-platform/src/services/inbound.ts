@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { emitRealtime } from "../lib/events";
 import { generateReply } from "../ai";
-import { tryTriggerJourney } from "./journeys";
+import { triggerNewContactJourneys, tryTriggerJourney } from "./journeys";
 import { sendWhatsAppText } from "./whatsapp";
 import type { Tenant, Conversation } from "@prisma/client";
 
@@ -50,6 +50,7 @@ async function upsertContact(tenantId: string, phone: string, name?: string) {
   await prisma.contact.create({
     data: { tenantId, phone, name, source: "inbound" },
   });
+  return true; // newly created
 }
 
 export interface InboundMessage {
@@ -77,7 +78,10 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
   const conv = await upsertConversation(tenant.id, msg.phone, msg.customerName);
 
   // Every inbound customer becomes a Contact (marketing audience).
-  await upsertContact(tenant.id, msg.phone, msg.customerName);
+  const isNewContact = await upsertContact(tenant.id, msg.phone, msg.customerName);
+  if (isNewContact) {
+    triggerNewContactJourneys(tenant, msg.phone, msg.customerName).catch(() => {});
+  }
 
   const inbound = await prisma.message.create({
     data: {

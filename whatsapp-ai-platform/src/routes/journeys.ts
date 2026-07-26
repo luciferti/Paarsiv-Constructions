@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAuth, requireRole } from "../middleware/auth";
-import { runJourney, runJourneyGraph, type JourneyStep } from "../services/journeys";
+import { runJourney, runJourneyGraph, runJourneyForSegment, type JourneyStep } from "../services/journeys";
 import { graphToSteps, triggerOf, type GraphEdge, type GraphNode } from "../lib/journeyGraph";
 
 export const journeysRouter = Router();
@@ -30,7 +30,7 @@ const edgeSchema = z.object({
 });
 const bodySchema = z.object({
   name: z.string().min(1),
-  triggerType: z.enum(["keyword", "new_contact"]).optional(),
+  triggerType: z.enum(["keyword", "segment", "new_contact"]).optional(),
   triggerValue: z.string().optional(),
   steps: z.array(stepSchema).max(30).optional(),
   nodes: z.array(nodeSchema).max(50).optional(),
@@ -84,6 +84,22 @@ journeysRouter.post("/", requireRole("ADMIN", "RM"), async (req, res) => {
     data: { tenantId: req.auth!.tenantId, name: d.name, status: "DRAFT", ...resolveGraph(d) },
   });
   res.status(201).json({ journey });
+});
+
+/** POST /journeys/:id/run — enroll a segment into the journey (admin/RM). */
+journeysRouter.post("/:id/run", requireRole("ADMIN", "RM"), async (req, res) => {
+  const j = await prisma.journey.findFirst({
+    where: { id: req.params.id, tenantId: req.auth!.tenantId },
+  });
+  if (!j) return res.status(404).json({ error: "not found" });
+  if (j.triggerType !== "segment") {
+    return res.status(400).json({ error: "this journey's entry source is not a segment" });
+  }
+  const tenant = await prisma.tenant.findUnique({ where: { id: req.auth!.tenantId } });
+  if (!tenant) return res.status(404).json({ error: "tenant missing" });
+
+  const result = await runJourneyForSegment(tenant, j);
+  res.json(result);
 });
 
 /** PATCH /journeys/:id — update name + graph (admin/RM). */
