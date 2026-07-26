@@ -77,6 +77,17 @@ model Tenant {
   webhookSubscribed    Boolean  @default(false)
   connectedAt          DateTime?
   connectionError      String?
+  // Business details collected before the Meta popup (SFMC-style setup wizard)
+  businessLegalName    String?
+  businessEmail        String?
+  businessWebsite      String?
+  businessCountry      String?
+  businessTimezone     String?
+  businessVertical     String?  // Meta business category
+  businessAddress      String?
+  businessDescription  String?
+  // How far through the setup wizard this workspace has got
+  setupStep            Int      @default(0)
   // AI engine config
   aiSource       AiSource @default(OWN)
   aiEnabled      Boolean  @default(true)

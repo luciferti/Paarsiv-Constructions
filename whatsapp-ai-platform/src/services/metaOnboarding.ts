@@ -216,6 +216,85 @@ export async function registerNumber(tenant: Tenant, token: string, phoneNumberI
   });
 }
 
+/**
+ * Number verification, the way the setup wizard walks it: ask Meta to send a
+ * code to the number, then hand the code back. A number that came through the
+ * popup is usually verified already and skips both.
+ */
+export async function requestVerificationCode(
+  tenant: Tenant,
+  token: string,
+  phoneNumberId: string,
+  method: "SMS" | "VOICE",
+  language = "en_US"
+) {
+  return graph<any>(`${phoneNumberId}/request_code`, {
+    token,
+    method: "POST",
+    version: tenant.graphVersion,
+    body: { code_method: method, language },
+  });
+}
+
+export async function verifyCode(tenant: Tenant, token: string, phoneNumberId: string, code: string) {
+  return graph<any>(`${phoneNumberId}/verify_code`, {
+    token,
+    method: "POST",
+    version: tenant.graphVersion,
+    body: { code },
+  });
+}
+
+export interface BusinessProfile {
+  about?: string;
+  address?: string;
+  description?: string;
+  email?: string;
+  websites?: string[];
+  vertical?: string;
+  profilePictureUrl?: string;
+}
+
+/** The public profile customers see when they open the chat. */
+export async function getBusinessProfile(tenant: Tenant, token: string, phoneNumberId: string): Promise<BusinessProfile> {
+  const data = await graph<{ data: any[] }>(`${phoneNumberId}/whatsapp_business_profile`, {
+    token,
+    version: tenant.graphVersion,
+    query: { fields: "about,address,description,email,websites,vertical,profile_picture_url" },
+  });
+  const p = data.data?.[0] || {};
+  return {
+    about: p.about,
+    address: p.address,
+    description: p.description,
+    email: p.email,
+    websites: p.websites || [],
+    vertical: p.vertical,
+    profilePictureUrl: p.profile_picture_url,
+  };
+}
+
+export async function setBusinessProfile(
+  tenant: Tenant,
+  token: string,
+  phoneNumberId: string,
+  profile: BusinessProfile
+) {
+  const body: Record<string, unknown> = { messaging_product: "whatsapp" };
+  if (profile.about !== undefined) body.about = profile.about;
+  if (profile.address !== undefined) body.address = profile.address;
+  if (profile.description !== undefined) body.description = profile.description;
+  if (profile.email !== undefined) body.email = profile.email;
+  if (profile.vertical) body.vertical = profile.vertical;
+  if (profile.websites?.length) body.websites = profile.websites.filter(Boolean).slice(0, 2);
+  return graph<any>(`${phoneNumberId}/whatsapp_business_profile`, {
+    token,
+    method: "POST",
+    version: tenant.graphVersion,
+    body,
+  });
+}
+
 export interface ConnectResult {
   wabaId: string;
   phoneNumberId?: string;
@@ -304,6 +383,7 @@ export async function completeSignup(
       webhookSubscribed: subscribed,
       connectedAt: new Date(),
       connectionError: null,
+      setupStep: Math.max(tenant.setupStep, chosen ? 3 : 2),
     },
   });
 
@@ -322,8 +402,16 @@ export class StepFailure extends Error {
 export interface ConnectionStatus {
   configured: boolean;          // Meta app details present
   connected: boolean;           // token + waba + number present
+  /** True when the platform itself supplies the app — clients never see it. */
+  platformProvided: boolean;
   appId?: string;
   configId?: string;
+  setupStep: number;
+  business_details?: {
+    legalName?: string | null; email?: string | null; website?: string | null;
+    country?: string | null; timezone?: string | null; vertical?: string | null;
+    address?: string | null; description?: string | null;
+  };
   business?: { id?: string | null; name?: string | null; verification?: string | null };
   waba?: { id?: string | null; name?: string | null; reviewStatus?: string | null };
   number?: {
@@ -347,8 +435,20 @@ export function statusOf(tenant: Tenant, publicUrl: string): ConnectionStatus {
   return {
     configured: isAppConfigured(tenant),
     connected: !!(tenant.whatsappToken && tenant.wabaId && tenant.phoneNumberId),
+    platformProvided: !!(env.metaAppId && env.metaAppSecret && env.metaConfigId),
     appId: cfg.appId || undefined,
     configId: cfg.configId || undefined,
+    setupStep: tenant.setupStep,
+    business_details: {
+      legalName: tenant.businessLegalName,
+      email: tenant.businessEmail,
+      website: tenant.businessWebsite,
+      country: tenant.businessCountry,
+      timezone: tenant.businessTimezone,
+      vertical: tenant.businessVertical,
+      address: tenant.businessAddress,
+      description: tenant.businessDescription,
+    },
     business: { id: tenant.businessId, name: tenant.businessName, verification: tenant.businessVerification },
     waba: { id: tenant.wabaId, name: tenant.wabaName, reviewStatus: tenant.wabaReviewStatus },
     number: {

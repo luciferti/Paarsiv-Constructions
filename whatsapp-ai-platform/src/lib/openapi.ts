@@ -57,6 +57,13 @@ export const openapiSpec = {
     "/contacts/import": { post: { summary: "Bulk import (≤5000); dryRun previews without writing", responses: { "200": { description: "created, updated and skipped rows" } } } },
     "/whatsapp/status": { get: { summary: "Meta connection state + webhook details", responses: { "200": { description: "status" } } } },
     "/whatsapp/app": { patch: { summary: "One-time Meta app credentials (secret is write-only)", responses: { "200": { description: "status" } } } },
+    "/whatsapp/business": { patch: { summary: "Setup wizard step 1 — business details", responses: { "200": { description: "status" } } } },
+    "/whatsapp/numbers/request-code": { post: { summary: "Send a verification code to a number (SMS or VOICE)", responses: { "200": { description: "sent" } } } },
+    "/whatsapp/numbers/verify-code": { post: { summary: "Confirm the code and register the number", responses: { "200": { description: "status" } } } },
+    "/whatsapp/profile": {
+      get: { summary: "Public WhatsApp business profile", responses: { "200": { description: "profile" } } },
+      post: { summary: "Update the public profile", responses: { "200": { description: "status" } } },
+    },
     "/whatsapp/connect": { post: { summary: "Finish Embedded Signup from the popup's code", responses: { "200": { description: "status + per-step trace" }, "400": { description: "Meta error with code, hint and fbtrace_id" } } } },
     "/whatsapp/verify": { post: { summary: "Re-run live checks against Meta", responses: { "200": { description: "checks" } } } },
     "/whatsapp/repair": { post: { summary: "Re-subscribe the webhook", responses: { "200": { description: "status" } } } },

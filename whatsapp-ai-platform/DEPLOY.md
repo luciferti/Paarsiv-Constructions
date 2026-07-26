@@ -44,11 +44,19 @@ Set in production:
 
 ## Connecting a real WhatsApp number (Meta Cloud API)
 
-Connecting is done in the app under **Settings → WhatsApp**. No tokens are
-copied by hand — Meta's Embedded Signup window handles the login, the business
-selection and number verification, and the server does the rest.
+Connecting is done in the app under **Settings → WhatsApp**, as a five-step
+wizard: business details → connect Meta → phone number → public profile →
+finish. No tokens are copied by hand.
 
-### One-time: your Meta app
+### Who supplies the Meta app
+
+Set `META_APP_ID`, `META_APP_SECRET` and `META_CONFIG_ID` on the server and the
+platform itself is the tech provider: every workspace just presses **Continue
+with Facebook** and never sees an App ID or secret — the same experience SFMC or
+Interakt give their customers. Leave them unset and each workspace supplies its
+own app in the wizard's Advanced panel instead.
+
+### One-time: the Meta app
 
 Create an app once at developers.facebook.com (type **Business**, product
 **WhatsApp**), then:
@@ -70,12 +78,23 @@ These can also be supplied server-wide via `META_APP_ID`, `META_APP_SECRET` and
 `PUBLIC_URL` must be the public origin of the API — it's what the screen shows
 as the callback URL. A localhost address will never receive a webhook.
 
-### Every connection after that
+### The wizard
 
-Press **Connect with Facebook**. The server then exchanges the code for a
-business token, discovers the WhatsApp Business Account, subscribes this server
-to its webhooks and registers the number for the Cloud API — each step reported
-on screen, and any Meta error shown with its code, hint and `fbtrace_id`.
+1. **Business details** — legal name, category, country, email, website, address.
+   Stored locally and used to pre-fill the WhatsApp profile later.
+2. **Connect Meta** — Meta's window handles sign-in, the business portfolio and
+   creating the WhatsApp Business Account. The server then exchanges the code for
+   a business token, discovers the account, subscribes this server to its
+   webhooks and registers the number — each step reported on screen.
+3. **Phone number** — every number on the account with its verification state and
+   quality rating. Unverified numbers get a code by SMS or voice call, entered
+   right there; then the number is registered for sending.
+4. **Public profile** — the about line, description, address, email, website and
+   category customers see, pre-filled from step 1.
+5. **Finish** — portfolio verification, account review status, number quality and
+   webhook state, with Re-check and Repair.
+
+Any Meta error is shown with its message, code, hint and `fbtrace_id`.
 
 Once connected, sending stops being simulated, and **delivered / read counts
 come from Meta's status webhooks** rather than being estimated. Use **Re-check**

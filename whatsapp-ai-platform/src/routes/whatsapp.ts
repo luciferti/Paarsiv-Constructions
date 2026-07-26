@@ -9,11 +9,15 @@ import {
   MetaApiError,
   StepFailure,
   completeSignup,
+  getBusinessProfile,
   isSubscribed,
   listPhoneNumbers,
   registerNumber,
+  requestVerificationCode,
+  setBusinessProfile,
   statusOf,
   subscribeApp,
+  verifyCode,
   verifyConnection,
 } from "../services/metaOnboarding";
 
@@ -68,6 +72,153 @@ whatsappRouter.patch("/app", requirePermission("settings.manage"), async (req, r
   const updated = await prisma.tenant.update({ where: { id: tenant.id }, data });
   audit(req, "whatsapp.app_configured", { meta: { appId: parsed.data.appId } });
   res.json({ status: statusOf(updated, env.publicUrl) });
+});
+
+const businessSchema = z.object({
+  legalName: z.string().trim().max(200).optional(),
+  email: z.string().trim().max(200).optional(),
+  website: z.string().trim().max(300).optional(),
+  country: z.string().trim().max(80).optional(),
+  timezone: z.string().trim().max(80).optional(),
+  vertical: z.string().trim().max(80).optional(),
+  address: z.string().trim().max(300).optional(),
+  description: z.string().trim().max(600).optional(),
+});
+
+/**
+ * PATCH /whatsapp/business — step 1 of the wizard. Collected before the Meta
+ * popup so the profile can be filled in for the customer afterwards.
+ */
+whatsappRouter.patch("/business", requirePermission("settings.manage"), async (req, res) => {
+  const parsed = businessSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const tenant = await tenantOf(req);
+  const d = parsed.data;
+
+  const updated = await prisma.tenant.update({
+    where: { id: tenant.id },
+    data: {
+      businessLegalName: d.legalName ?? undefined,
+      businessEmail: d.email ?? undefined,
+      businessWebsite: d.website ?? undefined,
+      businessCountry: d.country ?? undefined,
+      businessTimezone: d.timezone ?? undefined,
+      businessVertical: d.vertical ?? undefined,
+      businessAddress: d.address ?? undefined,
+      businessDescription: d.description ?? undefined,
+      setupStep: Math.max(tenant.setupStep, 1),
+      // A verify token is ours to invent — never ask anyone to make one up.
+      ...(tenant.verifyToken ? {} : { verifyToken: crypto.randomBytes(16).toString("hex") }),
+    },
+  });
+  audit(req, "whatsapp.business_details");
+  res.json({ status: statusOf(updated, env.publicUrl) });
+});
+
+const codeSchema = z.object({
+  phoneNumberId: z.string().min(1),
+  method: z.enum(["SMS", "VOICE"]).default("SMS"),
+  language: z.string().default("en_US"),
+});
+
+/** POST /whatsapp/numbers/request-code — Meta texts or calls the number. */
+whatsappRouter.post("/numbers/request-code", requirePermission("settings.manage"), async (req, res) => {
+  const parsed = codeSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const tenant = await tenantOf(req);
+  if (!tenant.whatsappToken) return res.status(400).json({ error: "Connect the Meta account first." });
+  try {
+    await requestVerificationCode(tenant, tenant.whatsappToken, parsed.data.phoneNumberId, parsed.data.method, parsed.data.language);
+    res.json({ sent: true, method: parsed.data.method });
+  } catch (e) {
+    sendMetaError(res, e);
+  }
+});
+
+const verifySchema = z.object({
+  phoneNumberId: z.string().min(1),
+  code: z.string().regex(/^\d{3}-?\d{3}$/, "Six digits, as Meta sent them"),
+  pin: z.string().regex(/^\d{6}$/).optional(),
+});
+
+/**
+ * POST /whatsapp/numbers/verify-code — confirm the code, then register the
+ * number so it can actually send.
+ */
+whatsappRouter.post("/numbers/verify-code", requirePermission("settings.manage"), async (req, res) => {
+  const parsed = verifySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const tenant = await tenantOf(req);
+  if (!tenant.whatsappToken) return res.status(400).json({ error: "Connect the Meta account first." });
+
+  const code = parsed.data.code.replace(/-/g, "");
+  try {
+    await verifyCode(tenant, tenant.whatsappToken, parsed.data.phoneNumberId, code);
+    let registerNote: string | undefined;
+    try {
+      await registerNumber(tenant, tenant.whatsappToken, parsed.data.phoneNumberId, parsed.data.pin || "000000");
+    } catch (e) {
+      registerNote = e instanceof MetaApiError ? e.detail.message : (e as Error).message;
+    }
+    const numbers = await listPhoneNumbers(tenant, tenant.whatsappToken, tenant.wabaId!).catch(() => []);
+    const n = numbers.find((x) => x.id === parsed.data.phoneNumberId);
+    const updated = await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: {
+        phoneNumberId: parsed.data.phoneNumberId,
+        displayPhoneNumber: n?.displayPhoneNumber ?? undefined,
+        verifiedName: n?.verifiedName ?? undefined,
+        qualityRating: n?.qualityRating ?? undefined,
+        messagingLimit: n?.messagingLimit ?? undefined,
+        setupStep: Math.max(tenant.setupStep, 3),
+      },
+    });
+    audit(req, "whatsapp.number_verified", { meta: { phoneNumberId: parsed.data.phoneNumberId } });
+    res.json({ status: statusOf(updated, env.publicUrl), registerNote });
+  } catch (e) {
+    sendMetaError(res, e);
+  }
+});
+
+/** GET /whatsapp/profile — the public profile customers see. */
+whatsappRouter.get("/profile", requirePermission("settings.manage"), async (req, res) => {
+  const tenant = await tenantOf(req);
+  if (!tenant.whatsappToken || !tenant.phoneNumberId) return res.json({ profile: null });
+  try {
+    res.json({ profile: await getBusinessProfile(tenant, tenant.whatsappToken, tenant.phoneNumberId) });
+  } catch (e) {
+    sendMetaError(res, e);
+  }
+});
+
+const profileSchema = z.object({
+  about: z.string().max(139).optional(),
+  address: z.string().max(256).optional(),
+  description: z.string().max(512).optional(),
+  email: z.string().max(128).optional(),
+  websites: z.array(z.string()).max(2).optional(),
+  vertical: z.string().optional(),
+});
+
+/** POST /whatsapp/profile — step 4 of the wizard. */
+whatsappRouter.post("/profile", requirePermission("settings.manage"), async (req, res) => {
+  const parsed = profileSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const tenant = await tenantOf(req);
+  if (!tenant.whatsappToken || !tenant.phoneNumberId) {
+    return res.status(400).json({ error: "Connect a number first." });
+  }
+  try {
+    await setBusinessProfile(tenant, tenant.whatsappToken, tenant.phoneNumberId, parsed.data);
+    const updated = await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: { setupStep: Math.max(tenant.setupStep, 4) },
+    });
+    audit(req, "whatsapp.profile_updated");
+    res.json({ status: statusOf(updated, env.publicUrl), profile: parsed.data });
+  } catch (e) {
+    sendMetaError(res, e);
+  }
 });
 
 const connectSchema = z.object({
