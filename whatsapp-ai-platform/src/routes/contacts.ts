@@ -113,55 +113,94 @@ contactsRouter.post("/", requirePermission("contacts.edit"), async (req, res) =>
   res.status(201).json({ contact });
 });
 
-const importSchema = z.object({
-  contacts: z
-    .array(
-      z.object({
-        phone: z.string().min(6),
-        name: z.string().optional(),
-        email: z.string().optional(),
-        city: z.string().optional(),
-        tags: z.array(z.string()).optional(),
-        attributes: z.record(z.string(), z.any()).optional(),
-      })
-    )
-    .min(1)
-    .max(5000),
+const importRowSchema = z.object({
+  // Deliberately lenient: a bad number is reported as a skipped row rather
+  // than failing the whole file.
+  phone: z.string(),
+  name: z.string().optional(),
+  email: z.string().optional(),
+  city: z.string().optional(),
+  company: z.string().optional(),
+  jobTitle: z.string().optional(),
+  country: z.string().optional(),
+  externalId: z.string().optional(),
+  optedIn: z.boolean().optional(),
+  tags: z.array(z.string()).optional(),
+  attributes: z.record(z.string(), z.any()).optional(),
 });
 
-/** POST /contacts/import — bulk upsert (admin/RM). */
+const importSchema = z.object({
+  contacts: z.array(importRowSchema).min(1).max(5000),
+  /** Validate and report without writing anything — powers the preview step. */
+  dryRun: z.boolean().optional(),
+  /** How to treat a phone number that already exists. */
+  onDuplicate: z.enum(["update", "skip"]).optional(),
+  /** Applied to every imported row on top of its own tags. */
+  extraTags: z.array(z.string()).optional(),
+});
+
+/**
+ * POST /contacts/import — bulk upsert, with a dry run so the wizard can show
+ * what will happen before anything is written. Rows are reported per index so
+ * the UI can point at the offending line of the file.
+ */
 contactsRouter.post("/import", requirePermission("contacts.import"), async (req, res) => {
   const parsed = importSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const { contacts, dryRun, onDuplicate = "update", extraTags = [] } = parsed.data;
+  const tenantId = req.auth!.tenantId;
 
-  let created = 0;
-  for (const raw of parsed.data.contacts) {
-    const phone = raw.phone.replace(/[^\d]/g, "");
-    if (!phone) continue;
-    await prisma.contact.upsert({
-      where: { tenantId_phone: { tenantId: req.auth!.tenantId, phone } },
-      update: {
-        name: raw.name || undefined,
-        email: raw.email || undefined,
-        city: raw.city || undefined,
-        tags: raw.tags ?? undefined,
-        attributes: raw.attributes ?? undefined,
-      },
-      create: {
-        tenantId: req.auth!.tenantId,
-        phone,
-        name: raw.name,
-        email: raw.email,
-        city: raw.city,
-        tags: raw.tags ?? [],
-        attributes: raw.attributes ?? undefined,
-        source: "import",
-      },
-    });
-    created++;
+  const skipped: { row: number; phone?: string; reason: string }[] = [];
+  const cleaned: { row: number; phone: string; data: z.infer<typeof importRowSchema> }[] = [];
+  const seen = new Map<string, number>();
+
+  contacts.forEach((raw, i) => {
+    const phone = (raw.phone || "").replace(/[^\d]/g, "");
+    if (phone.length < 8) return void skipped.push({ row: i + 1, phone: raw.phone, reason: "Phone number is too short" });
+    const dupRow = seen.get(phone);
+    if (dupRow) return void skipped.push({ row: i + 1, phone, reason: `Same number as row ${dupRow} in this file` });
+    seen.set(phone, i + 1);
+    cleaned.push({ row: i + 1, phone, data: raw });
+  });
+
+  const existing = new Set(
+    (await prisma.contact.findMany({
+      where: { tenantId, phone: { in: cleaned.map((c) => c.phone) } },
+      select: { phone: true },
+    })).map((c) => c.phone)
+  );
+
+  let created = 0, updated = 0;
+  for (const { row, phone, data } of cleaned) {
+    const isNew = !existing.has(phone);
+    if (!isNew && onDuplicate === "skip") {
+      skipped.push({ row, phone, reason: "Already in the workspace" });
+      continue;
+    }
+    const tags = [...new Set([...(data.tags ?? []), ...extraTags])];
+    if (!dryRun) {
+      const fields = {
+        name: data.name || undefined,
+        email: data.email || undefined,
+        city: data.city || undefined,
+        company: data.company || undefined,
+        jobTitle: data.jobTitle || undefined,
+        country: data.country || undefined,
+        externalId: data.externalId || undefined,
+        optedIn: data.optedIn,
+        attributes: data.attributes ?? undefined,
+      };
+      await prisma.contact.upsert({
+        where: { tenantId_phone: { tenantId, phone } },
+        update: { ...fields, ...(tags.length ? { tags } : {}) },
+        create: { tenantId, phone, ...fields, tags, source: "import" },
+      });
+    }
+    if (isNew) created++; else updated++;
   }
-  audit(req, "contacts.import", { meta: { count: created } });
-  res.json({ imported: created });
+
+  if (!dryRun) audit(req, "contacts.import", { meta: { created, updated, skipped: skipped.length } });
+  res.json({ imported: created + updated, created, updated, skipped, dryRun: !!dryRun });
 });
 
 const patchSchema = z.object({

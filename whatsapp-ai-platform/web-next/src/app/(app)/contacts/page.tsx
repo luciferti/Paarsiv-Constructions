@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Users, Folder as FolderIcon, FolderPlus, Plus, Filter, ChevronDown, ChevronRight,
@@ -21,29 +21,6 @@ const BASE_FIELDS: { v: string; label: string }[] = [
   { v: "email", label: "Email" },
   { v: "optedIn", label: "Opted in" },
 ];
-
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [], cell = "", inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) {
-      if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else inQ = false; }
-      else cell += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ",") { row.push(cell); cell = ""; }
-    else if (c === "\n" || c === "\r") {
-      if (c === "\r" && text[i + 1] === "\n") i++;
-      row.push(cell); cell = "";
-      if (row.some((x) => x.trim() !== "")) rows.push(row);
-      row = [];
-    } else cell += c;
-  }
-  if (cell !== "" || row.length) { row.push(cell); if (row.some((x) => x.trim() !== "")) rows.push(row); }
-  return rows;
-}
-
-const BASE_KEYS = ["phone", "name", "email", "city", "tags"];
 
 function describeRules(seg: Segment, fields: ContactField[]): string {
   const conds = seg.rules?.conditions || [];
@@ -86,8 +63,6 @@ export default function ContactsPage() {
   const [selectAllMatching, setSelectAllMatching] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [importMsg, setImportMsg] = useState<string | null>(null);
-  const csvRef = useRef<HTMLInputElement>(null);
 
 
 
@@ -135,30 +110,6 @@ export default function ContactsPage() {
     }
     return { byFolder, ungrouped };
   }, [segments]);
-
-  // ---------- csv ----------
-  async function importCsv(file: File) {
-    setImportMsg("Importing…");
-    const rows = parseCsv(await file.text());
-    if (rows.length < 2) { setImportMsg("CSV needs a header row and data."); return; }
-    const headers = rows[0].map((h) => h.trim().toLowerCase());
-    const payload = rows.slice(1).map((cells) => {
-      const rec: Record<string, unknown> & { attributes: Record<string, string> } = { attributes: {} };
-      headers.forEach((h, i) => {
-        const v = (cells[i] ?? "").trim(); if (!v) return;
-        if (h === "phone" || h === "mobile" || h === "number") rec.phone = v;
-        else if (BASE_KEYS.includes(h)) {
-          if (h === "tags") rec.tags = v.split(/[;|]/).map((t) => t.trim()).filter(Boolean);
-          else rec[h] = v;
-        } else rec.attributes[h.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")] = v;
-      });
-      return rec;
-    }).filter((r) => r.phone);
-    if (!payload.length) { setImportMsg("No rows with a phone column found."); return; }
-    const r = await api.post<{ imported: number }>("/contacts/import", { contacts: payload });
-    setImportMsg(`Imported ${r.imported} contacts.`);
-    loadContacts(); loadAll(); loadFields();
-  }
 
   /** The filter the server should apply — the same one driving the table. */
   const filterBody = useCallback(() => {
@@ -303,10 +254,9 @@ export default function ContactsPage() {
             <button onClick={() => router.push('/contacts/fields')} className="w-full flex items-center gap-2 h-8 px-3 rounded-lg text-[13px] text-muted-foreground hover:bg-muted">
               <SlidersHorizontal className="w-4 h-4" /> Custom fields
             </button>
-            <button onClick={() => csvRef.current?.click()} className="w-full flex items-center gap-2 h-8 px-3 rounded-lg text-[13px] text-muted-foreground hover:bg-muted">
+            <button onClick={() => router.push("/contacts/import")} className="w-full flex items-center gap-2 h-8 px-3 rounded-lg text-[13px] text-muted-foreground hover:bg-muted">
               <Upload className="w-4 h-4" /> Import CSV
             </button>
-            <input ref={csvRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && importCsv(e.target.files[0])} />
           </div>
         )}
       </aside>
@@ -416,7 +366,6 @@ export default function ContactsPage() {
           )}
         </div>
 
-        {importMsg && <div className="px-6 py-2 text-xs text-primary bg-accent/60">{importMsg}</div>}
         {bulkMsg && <div className="px-6 py-2 text-xs text-primary bg-accent/60">{bulkMsg}</div>}
 
         {(selected.size > 0 || selectAllMatching) && (
