@@ -597,7 +597,7 @@ class RuleBasedAnswerProvider(AnswerProvider):
             )
         if not any_budget:
             return "No budgets set yet. Open a site → Budget tab → add budget lines to track budget vs actual."
-        return "Budget vs actual by site (actuals = materials + labour + approved invoices):\n" + "\n".join(rows)
+        return "Budget vs actual by site (actuals = materials + labour + equipment + approved invoices):\n" + "\n".join(rows)
 
     def _answer_purchase_orders(self, context: AssistantContext) -> str:
         pos = context.purchase_orders()
