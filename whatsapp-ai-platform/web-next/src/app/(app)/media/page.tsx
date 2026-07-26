@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Trash2, Upload, Video } from "lucide-react";
 import { api, getSession, getToken } from "@/lib/api";
 import FolderSidebar from "@/components/FolderSidebar";
+import Pagination, { EMPTY_PAGE, type PageMeta } from "@/components/Pagination";
 import type { Asset, Folder } from "@/lib/types";
 
 function fmtSize(b: number): string {
@@ -19,20 +20,29 @@ export default function MediaPage() {
   const [allCount, setAllCount] = useState(0);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [active, setActive] = useState("");
+  const [meta, setMeta] = useState<PageMeta>(EMPTY_PAGE);
+  const [page, setPage] = useState(1);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadAssets = useCallback(() => {
-    const q = active ? `?folderId=${active}` : "";
-    api.get<{ assets: Asset[] }>(`/assets${q}`).then((r) => setAssets(r.assets)).catch(() => {});
-  }, [active]);
+    const q = new URLSearchParams({ page: String(page), pageSize: "24" });
+    if (active) q.set("folderId", active);
+    api.get<{ assets: Asset[] } & PageMeta>(`/assets?${q}`)
+      .then((r) => {
+        setAssets(r.assets);
+        setMeta({ total: r.total, page: r.page, pageSize: r.pageSize, pages: r.pages });
+      })
+      .catch(() => {});
+  }, [active, page]);
   const loadAll = useCallback(() => {
-    api.get<{ assets: Asset[] }>("/assets").then((r) => setAllCount(r.assets.length)).catch(() => {});
+    api.get<{ total: number }>("/assets?pageSize=1").then((r) => setAllCount(r.total)).catch(() => {});
   }, []);
   const loadFolders = useCallback(() => {
     api.get<{ folders: Folder[] }>("/asset-folders").then((r) => setFolders(r.folders)).catch(() => {});
   }, []);
 
   useEffect(() => { loadFolders(); loadAll(); }, [loadFolders, loadAll]);
+  useEffect(() => { setPage(1); }, [active]);
   useEffect(loadAssets, [loadAssets]);
 
   async function upload(file: File) {
@@ -67,7 +77,7 @@ export default function MediaPage() {
           <div>
             <div className="flex items-center gap-2.5">
               <h1 className="text-lg font-semibold">{headerName}</h1>
-              <span className="text-[11px] px-2 py-0.5 rounded-full border text-muted-foreground">{assets.length} files</span>
+              <span className="text-[11px] px-2 py-0.5 rounded-full border text-muted-foreground">{meta.total} files</span>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">Images, videos and documents for your messages (max 16 MB).</p>
           </div>
@@ -121,6 +131,7 @@ export default function MediaPage() {
           {assets.length === 0 && (
             <p className="text-sm text-muted-foreground col-span-full">No files here. Upload one to get started.</p>
           )}
+          <div className="col-span-full"><Pagination meta={meta} label="files" onPage={setPage} /></div>
         </div>
       </section>
     </div>

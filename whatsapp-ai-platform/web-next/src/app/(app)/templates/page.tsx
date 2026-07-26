@@ -9,6 +9,7 @@ import {
 import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
 import FolderSidebar from "@/components/FolderSidebar";
+import Pagination, { EMPTY_PAGE, type PageMeta } from "@/components/Pagination";
 import type { Folder, Template } from "@/lib/types";
 
 const btnPri = "h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 disabled:opacity-50";
@@ -51,18 +52,28 @@ export default function TemplatesPage() {
   const [active, setActive] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [meta, setMeta] = useState<PageMeta>(EMPTY_PAGE);
+  const [page, setPage] = useState(1);
 
   const loadTemplates = useCallback(() => {
-    api.get<{ templates: Template[] }>("/templates").then((r) => setTemplates(r.templates)).catch(() => {});
-  }, []);
+    const q = new URLSearchParams({ page: String(page), pageSize: "24" });
+    if (active) q.set("folderId", active);
+    api.get<{ templates: Template[] } & PageMeta>(`/templates?${q}`)
+      .then((r) => {
+        setTemplates(r.templates);
+        setMeta({ total: r.total, page: r.page, pageSize: r.pageSize, pages: r.pages });
+      })
+      .catch(() => {});
+  }, [page, active]);
   const loadFolders = useCallback(() => {
     api.get<{ folders: Folder[] }>("/template-folders").then((r) => setFolders(r.folders)).catch(() => {});
   }, []);
+  useEffect(() => { setPage(1); }, [active]);
   useEffect(() => {
     loadTemplates(); loadFolders();
   }, [loadTemplates, loadFolders]);
 
-  const shown = templates.filter((t) => (active ? t.folderId === active : true));
+  const shown = templates;
   const counts = new Map<string, number>();
   for (const t of templates) if (t.folderId) counts.set(t.folderId, (counts.get(t.folderId) || 0) + 1);
 
@@ -80,7 +91,7 @@ export default function TemplatesPage() {
     <div className="flex-1 flex min-h-0">
       <FolderSidebar
         allLabel="All templates"
-        allCount={templates.length}
+        allCount={meta.total}
         folders={folders.map((f) => ({ ...f, count: counts.get(f.id) || 0 }))}
         active={active}
         onSelect={setActive}
@@ -190,6 +201,7 @@ export default function TemplatesPage() {
             );
           })}
           {shown.length === 0 && <p className="text-sm text-muted-foreground col-span-full">No templates here yet.</p>}
+          <div className="col-span-full"><Pagination meta={meta} label="templates" onPage={setPage} /></div>
         </div>
       </section>
 

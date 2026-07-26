@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { extractTokens } from "../lib/tokens";
 import { deleteOnMeta, submitToMeta, syncFromMeta } from "../services/metaTemplates";
+import { pageMeta, parsePaging } from "../lib/pagination";
 
 export const templatesRouter = Router();
 templatesRouter.use(requireAuth);
@@ -58,12 +59,16 @@ async function assetUrlMap(tenantId: string, templates: { headerAssetId: string 
 
 /** GET /templates — list with tokens, Meta status and resolved media URLs. */
 templatesRouter.get("/", async (req, res) => {
-  const templates = await prisma.template.findMany({
-    where: { tenantId: req.auth!.tenantId },
-    orderBy: { createdAt: "desc" },
-  });
+  const paging = parsePaging(req, 24);
+  const folderId = typeof req.query.folderId === "string" && req.query.folderId ? req.query.folderId : undefined;
+  const where = { tenantId: req.auth!.tenantId, ...(folderId ? { folderId } : {}) };
+  const [templates, total] = await Promise.all([
+    prisma.template.findMany({ where, orderBy: { createdAt: "desc" }, skip: paging.skip, take: paging.take }),
+    prisma.template.count({ where }),
+  ]);
   const urls = await assetUrlMap(req.auth!.tenantId, templates);
   res.json({
+    ...pageMeta(total, paging),
     templates: templates.map((t) => ({
       ...shape(t, urls),
       cards: ((t.cards as { assetId?: string; body?: string }[]) || []).map((c) => ({

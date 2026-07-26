@@ -10,6 +10,7 @@ import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
 import type { Contact, ContactField, Folder, SegCondition, SegOp, Segment } from "@/lib/types";
 import DateRangeFilter, { rangeQuery, type DateRange } from "@/components/DateRangeFilter";
+import Pagination, { EMPTY_PAGE, type PageMeta } from "@/components/Pagination";
 
 const BASE_FIELDS: { v: string; label: string }[] = [
   { v: "city", label: "City" },
@@ -88,7 +89,8 @@ export default function ContactsPage() {
   const canEdit = session?.user.role === "ADMIN" || session?.user.role === "RM";
 
   const [contacts, setContacts] = useState<Contact[]>([]);
-  const [total, setTotal] = useState(0);
+  const [meta, setMeta] = useState<PageMeta>(EMPTY_PAGE);
+  const total = meta.total;
   const [allCount, setAllCount] = useState(0);
   const [search, setSearch] = useState("");
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -98,6 +100,8 @@ export default function ContactsPage() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [view, setView] = useState<"contacts" | "segments">("contacts"); // main-area mode
   const [range, setRange] = useState<DateRange>({ preset: "all" });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState<DrawerKind>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -126,12 +130,18 @@ export default function ContactsPage() {
     const p = new URLSearchParams();
     if (search) p.set("search", search);
     if (activeSeg) p.set("segmentId", activeSeg);
-    api.get<{ contacts: Contact[]; total: number }>(`/contacts?${p.toString()}${rangeQuery(range)}`)
-      .then((r) => { setContacts(r.contacts); setTotal(r.total); setSelected(new Set()); })
+    p.set("page", String(page));
+    p.set("pageSize", String(pageSize));
+    api.get<{ contacts: Contact[] } & PageMeta>(`/contacts?${p.toString()}${rangeQuery(range)}`)
+      .then((r) => {
+        setContacts(r.contacts);
+        setMeta({ total: r.total, page: r.page, pageSize: r.pageSize, pages: r.pages });
+        setSelected(new Set());
+      })
       .catch(() => {});
-  }, [search, activeSeg, range]);
+  }, [search, activeSeg, range, page, pageSize]);
   const loadAll = useCallback(() => {
-    api.get<{ total: number }>("/contacts").then((r) => setAllCount(r.total)).catch(() => {});
+    api.get<{ total: number }>("/contacts?pageSize=1").then((r) => setAllCount(r.total)).catch(() => {});
   }, []);
   const loadSegments = useCallback(() => {
     api.get<{ segments: Segment[] }>("/segments").then((r) => setSegments(r.segments)).catch(() => {});
@@ -144,6 +154,7 @@ export default function ContactsPage() {
   }, []);
 
   useEffect(() => { loadSegments(); loadFolders(); loadFields(); loadAll(); }, [loadSegments, loadFolders, loadFields, loadAll]);
+  useEffect(() => { setPage(1); }, [search, activeSeg, range]);
   useEffect(loadContacts, [loadContacts]);
 
   const activeSegment = segments.find((s) => s.id === activeSeg) || null;
@@ -553,6 +564,13 @@ export default function ContactsPage() {
               </tbody>
             </table>
           </div>
+          <Pagination
+            meta={meta}
+            label="contacts"
+            className="mt-4"
+            onPage={setPage}
+            onPageSize={(n) => { setPageSize(n); setPage(1); }}
+          />
         </div>
         </>)}
       </section>

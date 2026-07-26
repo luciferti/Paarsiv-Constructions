@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware/auth";
 import { conversationVisibilityWhere, canAssignTo } from "../lib/visibility";
 import { sendReply } from "../services/inbound";
 import { emitRealtime } from "../lib/events";
+import { pageMeta, parsePaging } from "../lib/pagination";
 
 export const conversationsRouter = Router();
 conversationsRouter.use(requireAuth);
@@ -21,24 +22,30 @@ conversationsRouter.get("/", async (req, res) => {
   const status = typeof req.query.status === "string" ? req.query.status : undefined;
   const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
 
-  const list = await prisma.conversation.findMany({
-    where: {
-      ...where,
-      ...(status ? { status } : {}),
-      ...(search
-        ? {
-            OR: [
-              { customerName: { contains: search, mode: "insensitive" } },
-              { phone: { contains: search } },
-            ],
-          }
-        : {}),
-    },
-    orderBy: { lastMessageAt: "desc" },
-    include: { assignedUser: { select: { id: true, displayName: true } } },
-    take: 200,
-  });
-  res.json({ conversations: list });
+  const paging = parsePaging(req, 50);
+  const listWhere = {
+    ...where,
+    ...(status ? { status } : {}),
+    ...(search
+      ? {
+          OR: [
+            { customerName: { contains: search as string, mode: "insensitive" as const } },
+            { phone: { contains: search } },
+          ],
+        }
+      : {}),
+  };
+  const [list, total] = await Promise.all([
+    prisma.conversation.findMany({
+      where: listWhere,
+      orderBy: { lastMessageAt: "desc" },
+      include: { assignedUser: { select: { id: true, displayName: true } } },
+      skip: paging.skip,
+      take: paging.take,
+    }),
+    prisma.conversation.count({ where: listWhere }),
+  ]);
+  res.json({ conversations: list, ...pageMeta(total, paging) });
 });
 
 /** GET /conversations/:id/messages — thread history + marks read. */

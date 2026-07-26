@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import clsx from "clsx";
 import { api } from "@/lib/api";
+import Pagination, { EMPTY_PAGE, type PageMeta } from "@/components/Pagination";
 import type { CampaignRecipient } from "@/lib/types";
 
 interface CampaignDetail {
@@ -61,10 +62,14 @@ export default function CampaignDetailPage() {
   const [data, setData] = useState<CampaignDetail | null>(null);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [recMeta, setRecMeta] = useState<PageMeta>(EMPTY_PAGE);
+  const [page, setPage] = useState(1);
 
   const load = useCallback(() => {
-    api.get<{ campaign: CampaignDetail }>(`/campaigns/${id}`).then((r) => setData(r.campaign)).catch(() => {});
-  }, [id]);
+    api.get<{ campaign: CampaignDetail; recipients: PageMeta }>(`/campaigns/${id}?page=${page}&pageSize=50`)
+      .then((r) => { setData(r.campaign); setRecMeta(r.recipients); })
+      .catch(() => {});
+  }, [id, page]);
   useEffect(load, [load]);
 
   const recipients = useMemo(() => {
@@ -204,7 +209,7 @@ export default function CampaignDetailPage() {
           <div className="px-5 py-4 border-b flex items-center gap-3 flex-wrap">
             <div>
               <h2 className="text-[15px] font-semibold">Recipients</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">{recipients.length} of {data.recipients.length} shown</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{recMeta.total} recipients{search || filter !== "all" ? ` · ${recipients.length} match on this page` : ""}</p>
             </div>
             <div className="flex-1" />
             <div className="relative">
@@ -251,6 +256,9 @@ export default function CampaignDetailPage() {
               )}
             </tbody>
           </table>
+          <div className="px-5 py-3 border-t">
+            <Pagination meta={recMeta} label="recipients" onPage={setPage} />
+          </div>
         </div>
       </div>
     </div>

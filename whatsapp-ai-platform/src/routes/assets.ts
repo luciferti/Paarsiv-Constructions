@@ -5,6 +5,7 @@ import fs from "fs";
 import crypto from "crypto";
 import { prisma } from "../lib/prisma";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { pageMeta, parsePaging } from "../lib/pagination";
 
 export const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -26,12 +27,14 @@ assetsRouter.use(requireAuth);
 
 /** GET /assets — media library, optionally filtered by ?folderId=. */
 assetsRouter.get("/", async (req, res) => {
-  const folderId = typeof req.query.folderId === "string" ? req.query.folderId : undefined;
-  const assets = await prisma.asset.findMany({
-    where: { tenantId: req.auth!.tenantId, ...(folderId ? { folderId } : {}) },
-    orderBy: { createdAt: "desc" },
-  });
-  res.json({ assets });
+  const folderId = typeof req.query.folderId === "string" && req.query.folderId ? req.query.folderId : undefined;
+  const paging = parsePaging(req, 24);
+  const where = { tenantId: req.auth!.tenantId, ...(folderId ? { folderId } : {}) };
+  const [assets, total] = await Promise.all([
+    prisma.asset.findMany({ where, orderBy: { createdAt: "desc" }, skip: paging.skip, take: paging.take }),
+    prisma.asset.count({ where }),
+  ]);
+  res.json({ assets, ...pageMeta(total, paging) });
 });
 
 /** POST /assets — multipart upload (field: "file", optional folderId). admin/RM. */

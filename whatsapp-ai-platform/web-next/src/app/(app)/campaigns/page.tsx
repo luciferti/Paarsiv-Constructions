@@ -7,6 +7,7 @@ import clsx from "clsx";
 import { api, getSession } from "@/lib/api";
 import type { CampaignSummary } from "@/lib/types";
 import DateRangeFilter, { DEFAULT_RANGE, rangeQuery, type DateRange } from "@/components/DateRangeFilter";
+import Pagination, { EMPTY_PAGE, type PageMeta } from "@/components/Pagination";
 
 const inputCls = "w-full h-9 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-ring";
 const btnPri = "h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 disabled:opacity-50";
@@ -26,10 +27,18 @@ export default function CampaignsPage() {
   const canEdit = session?.user.role === "ADMIN" || session?.user.role === "RM";
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
   const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
+  const [meta, setMeta] = useState<PageMeta>(EMPTY_PAGE);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const load = useCallback(() => {
-    api.get<{ campaigns: CampaignSummary[] }>(`/campaigns?_${rangeQuery(range)}`).then((r) => setCampaigns(r.campaigns)).catch(() => {});
-  }, [range]);
+    api.get<{ campaigns: CampaignSummary[] } & PageMeta>(`/campaigns?page=${page}&pageSize=${pageSize}${rangeQuery(range)}`)
+      .then((r) => {
+        setCampaigns(r.campaigns);
+        setMeta({ total: r.total, page: r.page, pageSize: r.pageSize, pages: r.pages });
+      })
+      .catch(() => {});
+  }, [range, page, pageSize]);
   useEffect(() => {
     load();
   }, [load]);
@@ -102,6 +111,8 @@ export default function CampaignsPage() {
             </tbody>
           </table>
         </div>
+        <Pagination meta={meta} label="campaigns" className="mt-4"
+          onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
       </div>
 
     </div>

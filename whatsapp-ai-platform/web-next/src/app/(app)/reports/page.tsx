@@ -13,7 +13,8 @@ import {
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import DateRangeFilter, { DEFAULT_RANGE, rangeQuery, type DateRange } from "@/components/DateRangeFilter";
-import type { ReportOverview } from "@/lib/types";
+import Pagination, { EMPTY_PAGE, type PageMeta } from "@/components/Pagination";
+import type { CampaignSummary, ReportOverview } from "@/lib/types";
 
 interface AgentReport {
   avgFirstResponseSec: number | null;
@@ -76,6 +77,9 @@ export default function ReportsPage() {
   const [series, setSeries] = useState<SeriesPoint[]>([]);
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null);
   const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
+  const [campaigns, setCampaigns] = useState<(CampaignSummary & { readRate: number })[]>([]);
+  const [campMeta, setCampMeta] = useState<PageMeta>(EMPTY_PAGE);
+  const [campPage, setCampPage] = useState(1);
 
   useEffect(() => {
     const q = `?_${rangeQuery(range)}`;
@@ -84,6 +88,18 @@ export default function ReportsPage() {
     api.get<{ series: SeriesPoint[] }>(`/reports/timeseries${q}`).then((r) => setSeries(r.series)).catch(() => {});
     api.get<Breakdown>(`/reports/breakdown${q}`).then(setBreakdown).catch(() => {});
   }, [range]);
+
+  useEffect(() => { setCampPage(1); }, [range]);
+  useEffect(() => {
+    api.get<{ campaigns: (CampaignSummary & { readRate: number })[] } & PageMeta>(
+      `/campaigns?page=${campPage}&pageSize=10${rangeQuery(range)}`
+    )
+      .then((r) => {
+        setCampaigns(r.campaigns);
+        setCampMeta({ total: r.total, page: r.page, pageSize: r.pageSize, pages: r.pages });
+      })
+      .catch(() => {});
+  }, [range, campPage]);
 
   if (!data) return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
 
@@ -245,7 +261,7 @@ export default function ReportsPage() {
         <div className="rounded-xl border bg-card shadow-card overflow-hidden">
           <div className="px-6 py-4 border-b">
             <h2 className="text-[15px] font-semibold">Campaign performance</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Click a campaign to open its full report</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{campMeta.total} campaigns · click one to open its full report</p>
           </div>
           <table className="w-full text-sm">
             <thead>
@@ -262,7 +278,7 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {data.campaigns.list.map((c) => (
+              {campaigns.map((c) => (
                 <tr key={c.id} onClick={() => router.push(`/campaigns/${c.id}`)}
                   className="border-b last:border-0 hover:bg-muted/40 cursor-pointer">
                   <td className="px-6 py-3 font-medium">{c.name}</td>
@@ -289,11 +305,14 @@ export default function ReportsPage() {
                   <td className="px-3 py-3 text-muted-foreground"><ChevronRight className="w-4 h-4" /></td>
                 </tr>
               ))}
-              {data.campaigns.list.length === 0 && (
+              {campaigns.length === 0 && (
                 <tr><td colSpan={9} className="px-6 py-6 text-muted-foreground">No campaigns in this period.</td></tr>
               )}
             </tbody>
           </table>
+          <div className="px-6 py-3 border-t">
+            <Pagination meta={campMeta} label="campaigns" onPage={setCampPage} />
+          </div>
         </div>
 
         {/* agent leaderboard */}

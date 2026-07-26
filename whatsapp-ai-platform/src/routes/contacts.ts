@@ -6,6 +6,7 @@ import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { audit } from "../lib/audit";
 import { findDuplicates, mergeContacts, mergeRulesOf, pickSurvivor } from "../services/merge";
 import { parseRange, dateFilter } from "../lib/dateRange";
+import { pageMeta, parsePaging } from "../lib/pagination";
 
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
@@ -43,11 +44,12 @@ contactsRouter.get("/", async (req, res) => {
     };
   }
 
+  const paging = parsePaging(req, 25);
   const [contacts, total] = await Promise.all([
-    prisma.contact.findMany({ where, orderBy: { createdAt: "desc" }, take: 500 }),
+    prisma.contact.findMany({ where, orderBy: { createdAt: "desc" }, skip: paging.skip, take: paging.take }),
     prisma.contact.count({ where }),
   ]);
-  res.json({ contacts, total });
+  res.json({ contacts, ...pageMeta(total, paging) });
 });
 
 const contactSchema = z.object({

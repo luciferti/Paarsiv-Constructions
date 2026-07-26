@@ -6,6 +6,7 @@ import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { runCampaign } from "../services/campaigns";
 import { audit } from "../lib/audit";
 import { parseRange, dateFilter } from "../lib/dateRange";
+import { pageMeta, parsePaging } from "../lib/pagination";
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -24,33 +25,42 @@ async function audienceCount(tenantId: string, segmentId: string | null): Promis
 
 /** GET /campaigns — list with template/segment names. */
 campaignsRouter.get("/", async (req, res) => {
-  const [campaigns, templates, segments] = await Promise.all([
-    prisma.campaign.findMany({
-      where: { tenantId: req.auth!.tenantId, ...(dateFilter(parseRange(req)) ? { createdAt: dateFilter(parseRange(req)) } : {}) },
-      orderBy: { createdAt: "desc" },
-    }),
+  const paging = parsePaging(req, 25);
+  const range = dateFilter(parseRange(req));
+  const where = { tenantId: req.auth!.tenantId, ...(range ? { createdAt: range } : {}) };
+  const [campaigns, total, templates, segments] = await Promise.all([
+    prisma.campaign.findMany({ where, orderBy: { createdAt: "desc" }, skip: paging.skip, take: paging.take }),
+    prisma.campaign.count({ where }),
     prisma.template.findMany({ where: { tenantId: req.auth!.tenantId }, select: { id: true, name: true } }),
     prisma.segment.findMany({ where: { tenantId: req.auth!.tenantId }, select: { id: true, name: true } }),
   ]);
   const tName = new Map(templates.map((t) => [t.id, t.name]));
   const sName = new Map(segments.map((s) => [s.id, s.name]));
+  const rate = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 100) : 0);
   res.json({
     campaigns: campaigns.map((c) => ({
       ...c,
       templateName: c.templateId ? tName.get(c.templateId) : null,
       segmentName: c.segmentId ? sName.get(c.segmentId) : "All contacts",
+      readRate: rate(c.readCount, c.sentCount),
     })),
+    ...pageMeta(total, paging),
   });
 });
 
 /** GET /campaigns/:id — one campaign + its recipients. */
 campaignsRouter.get("/:id", async (req, res) => {
+  const paging = parsePaging(req, 50);
   const c = await prisma.campaign.findFirst({
     where: { id: req.params.id, tenantId: req.auth!.tenantId },
-    include: { recipients: { orderBy: { sentAt: "desc" }, take: 200 }, template: true },
+    include: {
+      recipients: { orderBy: { sentAt: "desc" }, skip: paging.skip, take: paging.take },
+      template: true,
+    },
   });
   if (!c) return res.status(404).json({ error: "not found" });
-  res.json({ campaign: c });
+  const recipientTotal = await prisma.campaignRecipient.count({ where: { campaignId: c.id } });
+  res.json({ campaign: c, recipients: pageMeta(recipientTotal, paging) });
 });
 
 const createSchema = z.object({
