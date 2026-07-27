@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, MessageSquare, Bot, Megaphone, CheckCheck, Eye } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Users, MessageSquare, Bot, Megaphone, CheckCheck, Eye, AlertTriangle, ShieldAlert } from "lucide-react";
+import clsx from "clsx";
 import { api } from "@/lib/api";
 import DateRangeFilter, { DEFAULT_RANGE, rangeQuery, type DateRange } from "@/components/DateRangeFilter";
 
@@ -47,12 +49,23 @@ function Bar({ label, value, max, cls }: { label: string; value: number; max: nu
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [data, setData] = useState<Overview | null>(null);
   const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
+  const [health, setHealth] = useState<{
+    level: "ok" | "warn" | "error";
+    summary: string;
+    counts: { error: number; warn: number; ok: number };
+    checks: { key: string; title: string; level: string }[];
+  } | null>(null);
 
   useEffect(() => {
     api.get<Overview>(`/reports/overview?_${rangeQuery(range)}`).then(setData).catch(() => {});
   }, [range]);
+
+  useEffect(() => {
+    api.get<{ health: typeof health }>("/reports/health").then((r) => setHealth(r.health)).catch(() => {});
+  }, []);
 
   if (!data) {
     return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
@@ -72,6 +85,32 @@ export default function DashboardPage() {
       </div>
 
       <div className="p-8 space-y-6 max-w-6xl">
+        {/* Problems shouldn't wait to be discovered on another page. */}
+        {health && health.level !== "ok" && (
+          <button
+            onClick={() => router.push("/reports")}
+            className={clsx(
+              "w-full text-left rounded-xl border p-4 flex items-start gap-3 hover:opacity-90 transition-opacity",
+              health.level === "error" ? "border-destructive/40 bg-destructive/10" : "border-warning/40 bg-warning/10"
+            )}
+          >
+            {health.level === "error"
+              ? <ShieldAlert className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
+              : <AlertTriangle className="w-4 h-4 text-warning mt-0.5 shrink-0" />}
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold">{health.summary}</div>
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                {health.checks
+                  .filter((c) => c.level !== "ok")
+                  .slice(0, 3)
+                  .map((c) => c.title)
+                  .join(" · ")}
+              </p>
+            </div>
+            <span className="text-xs text-muted-foreground shrink-0 mt-0.5">See health →</span>
+          </button>
+        )}
+
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <Stat icon={Users} label="Contacts" value={data.audience.contacts} sub={`${data.audience.optedIn} opted in`} />
           <Stat icon={MessageSquare} label="Conversations" value={data.inbox.conversations} />

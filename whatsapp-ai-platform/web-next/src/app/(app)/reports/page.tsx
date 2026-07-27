@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Bot, ChevronRight, Eye, LayoutDashboard, Megaphone, MessageSquare,
-  Send as SendIcon, Timer, TrendingUp, Users, UsersRound,
+  Activity, AlertTriangle, Bot, Check as CheckIcon, ChevronRight, Eye, LayoutDashboard,
+  Megaphone, MessageSquare, Send as SendIcon, ShieldAlert, Timer, TrendingUp, Users, UsersRound,
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart,
@@ -37,9 +37,21 @@ interface Breakdown {
   total: number;
 }
 
-type Section = "overview" | "campaigns" | "messaging" | "audience" | "agents";
+type Section = "health" | "overview" | "campaigns" | "messaging" | "audience" | "agents";
+
+type Level = "ok" | "warn" | "error";
+interface Check {
+  key: string; area: string; level: Level; title: string; detail: string;
+  action?: { label: string; href: string };
+}
+interface Health {
+  level: Level; summary: string;
+  counts: { error: number; warn: number; ok: number };
+  checks: Check[];
+}
 
 const SECTIONS: { v: Section; label: string; desc: string; icon: React.ElementType }[] = [
+  { v: "health", label: "Health", desc: "Anything wrong?", icon: Activity },
   { v: "overview", label: "Overview", desc: "Headline numbers", icon: LayoutDashboard },
   { v: "campaigns", label: "Campaigns", desc: "Delivery and reads", icon: Megaphone },
   { v: "messaging", label: "Messaging", desc: "Volume and response", icon: MessageSquare },
@@ -93,7 +105,8 @@ function Card({ title, subtitle, children, className }: {
 
 export default function ReportsPage() {
   const router = useRouter();
-  const [section, setSection] = useState<Section>("overview");
+  const [section, setSection] = useState<Section>("health");
+  const [health, setHealth] = useState<Health | null>(null);
   const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
 
   const [data, setData] = useState<ReportOverview | null>(null);
@@ -110,6 +123,8 @@ export default function ReportsPage() {
     api.get<AgentReport>(`/reports/agents${q}`).then(setAgents).catch(() => {});
     api.get<{ series: SeriesPoint[] }>(`/reports/timeseries${q}`).then((r) => setSeries(r.series)).catch(() => {});
     api.get<Breakdown>(`/reports/breakdown${q}`).then(setBreakdown).catch(() => {});
+    // Health isn't date-scoped — it's about right now.
+    api.get<{ health: Health }>("/reports/health").then((r) => setHealth(r.health)).catch(() => {});
   }, [range]);
 
   useEffect(() => { setCampPage(1); }, [range]);
@@ -281,6 +296,65 @@ export default function ReportsPage() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-8 space-y-5 max-w-6xl">
+          {section === "health" && (
+            health ? (
+              <div className="space-y-4">
+                <div className={clsx(
+                  "rounded-xl border p-5 flex items-start gap-3",
+                  health.level === "error" ? "border-destructive/40 bg-destructive/10"
+                  : health.level === "warn" ? "border-warning/40 bg-warning/10"
+                  : "border-success/40 bg-success/10"
+                )}>
+                  {health.level === "error" ? <ShieldAlert className="w-5 h-5 text-destructive mt-0.5 shrink-0" />
+                  : health.level === "warn" ? <AlertTriangle className="w-5 h-5 text-warning mt-0.5 shrink-0" />
+                  : <CheckIcon className="w-5 h-5 text-success mt-0.5 shrink-0" />}
+                  <div>
+                    <div className="text-base font-semibold">{health.summary}</div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Checked just now across WhatsApp, campaigns, integrations and your audience.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {health.checks.map((c) => (
+                    <div key={c.key} className={clsx(
+                      "rounded-xl border bg-card shadow-card p-4 flex items-start gap-3",
+                      c.level === "error" && "border-destructive/30",
+                      c.level === "warn" && "border-warning/30"
+                    )}>
+                      <span className={clsx(
+                        "w-1.5 h-1.5 rounded-full mt-2 shrink-0",
+                        c.level === "error" ? "bg-destructive" : c.level === "warn" ? "bg-warning" : "bg-success"
+                      )} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium">{c.title}</span>
+                          <span className="text-[10px] px-1.5 py-px rounded bg-muted text-muted-foreground uppercase tracking-wide">
+                            {c.area}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{c.detail}</p>
+                      </div>
+                      {c.action && (
+                        <button
+                          className="h-8 px-3 rounded-lg border text-xs font-medium hover:bg-muted shrink-0"
+                          onClick={() => router.push(c.action!.href)}
+                        >
+                          {c.action.label}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
+                Checking…
+              </div>
+            )
+          )}
+
           {section === "overview" && (
             <>
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">

@@ -100,6 +100,7 @@ export const openapiSpec = {
       get: { summary: "List journeys", responses: { "200": { description: "journeys[]" } } },
       post: { summary: "Create keyword journey", responses: { "201": { description: "journey" } } },
     },
+    "/reports/health": { get: { summary: "Is anything wrong? Checks WhatsApp, campaigns, integrations and audience, each with the page that fixes it", responses: { "200": { description: "level, summary and checks[]" } } } },
     "/reports/overview": { get: { summary: "Audience + inbox + campaign-level report", responses: { "200": { description: "overview" } } } },
     "/api-keys": {
       get: { summary: "List API keys (admin)", responses: { "200": { description: "keys[] with their scopes" } } },

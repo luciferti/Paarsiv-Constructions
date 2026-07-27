@@ -299,3 +299,24 @@ just to what the inbox happens to render.
 
 Changing someone's numbers revokes their refresh tokens, so an open session
 can't keep using the old access.
+
+## Knowing when something is wrong
+
+**Reports → Health** answers one question for the whole workspace, and the
+dashboard carries a banner whenever the answer isn't "fine". Every problem
+names the page that fixes it, because a warning nobody can act on is noise.
+
+What it watches:
+
+- **WhatsApp** — connected at all, subscribed to Meta's webhooks, and the thing
+  that quietly throttles a workspace: a number's **quality rating** slipping to
+  yellow or red, and a messaging tier still capped at 1,000 a day.
+- **Campaigns** — paused and forgotten, still sending after six hours with
+  little progress, or failed outright this week.
+- **Integrations** — a connector that has gone quiet for a week after being
+  busy, or is rejecting events; an event webhook failing or auto-paused; a
+  script that fails more often than it works.
+- **Audience** — an opt-out spike (2% of contacts in a week is treated as
+  something recent landing badly), and how much of the list is still reachable.
+
+Nothing here is sampled or estimated — each check reads the state it's about.
