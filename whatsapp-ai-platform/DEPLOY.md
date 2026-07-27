@@ -283,3 +283,19 @@ Meta's own rate is the bottleneck long before Node is. If you ever need several
 numbers sending large campaigns at once, move `runCampaign` behind a real queue
 (BullMQ/Redis) — the function is already resumable and idempotent, so it can be
 lifted out without changing its behaviour.
+
+## Who can see which number
+
+A workspace with a Sales number and a Support number usually doesn't want the
+Support team reading Sales conversations. **Users → edit a person → WhatsApp
+numbers** ticks the numbers they work on. Leave it empty and they see every
+number, which is the right default for an admin and for a single-number
+workspace.
+
+The restriction sits underneath the existing role rules, not beside them: an RM
+still sees their team's conversations, but only on their numbers. It applies to
+the list, to opening a thread by its id, to its notes, and to replying — not
+just to what the inbox happens to render.
+
+Changing someone's numbers revokes their refresh tokens, so an open session
+can't keep using the old access.

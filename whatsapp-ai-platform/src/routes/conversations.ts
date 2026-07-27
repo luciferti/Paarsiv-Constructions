@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { requireAuth, requirePermission } from "../middleware/auth";
-import { conversationVisibilityWhere, canAssignTo } from "../lib/visibility";
+import { allowedNumbers, conversationVisibilityWhere, canAssignTo } from "../lib/visibility";
 import { sendReply } from "../services/inbound";
 import { emitRealtime } from "../lib/events";
 import { pageMeta, parsePaging } from "../lib/pagination";
@@ -25,18 +26,23 @@ conversationsRouter.get("/", requirePermission("inbox.view"), async (req, res) =
   const phoneNumberId = typeof req.query.phoneNumberId === "string" ? req.query.phoneNumberId : "";
 
   const paging = parsePaging(req, 50);
-  const listWhere = {
-    ...where,
-    ...(status ? { status } : {}),
-    ...(phoneNumberId ? { phoneNumberId } : {}),
-    ...(search
-      ? {
-          OR: [
-            { customerName: { contains: search as string, mode: "insensitive" as const } },
-            { phone: { contains: search } },
-          ],
-        }
-      : {}),
+  // AND-ed, never spread: `where` carries the visibility rules, and a filter
+  // from the query string must narrow them, never replace them. Spreading let
+  // ?phoneNumberId= hand someone a queue they aren't allowed to see.
+  const listWhere: Prisma.ConversationWhereInput = {
+    AND: [
+      where,
+      ...(status ? [{ status }] : []),
+      ...(phoneNumberId ? [{ phoneNumberId }] : []),
+      ...(search
+        ? [{
+            OR: [
+              { customerName: { contains: search, mode: "insensitive" as const } },
+              { phone: { contains: search } },
+            ],
+          }]
+        : []),
+    ],
   };
   const [list, total] = await Promise.all([
     prisma.conversation.findMany({
@@ -64,8 +70,12 @@ conversationsRouter.get("/", requirePermission("inbox.view"), async (req, res) =
  * so the inbox filter only offers numbers with something behind them.
  */
 conversationsRouter.get("/numbers", requirePermission("inbox.view"), async (req, res) => {
+  const allowed = await allowedNumbers(req.auth!);
   const numbers = await prisma.phoneNumber.findMany({
-    where: { tenantId: req.auth!.tenantId },
+    where: {
+      tenantId: req.auth!.tenantId,
+      ...(allowed.length ? { phoneNumberId: { in: allowed } } : {}),
+    },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     select: {
       phoneNumberId: true, displayPhoneNumber: true, label: true,

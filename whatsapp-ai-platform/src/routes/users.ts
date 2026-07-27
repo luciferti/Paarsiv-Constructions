@@ -21,6 +21,7 @@ const publicSelect = {
   presence: true,
   managerId: true,
   permissions: true,
+  phoneNumberIds: true,
   isActive: true,
   createdAt: true,
 } as const;
@@ -30,6 +31,16 @@ const shape = <T extends UserRow>(u: T) => ({
   ...u,
   effectivePermissions: effectivePermissions(u),
   usesRoleDefaults: u.permissions.length === 0,
+});
+
+/** GET /users/numbers — the numbers a user can be assigned to. */
+usersRouter.get("/numbers", requirePermission("users.manage"), async (req, res) => {
+  const numbers = await prisma.phoneNumber.findMany({
+    where: { tenantId: req.auth!.tenantId, active: true },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    select: { phoneNumberId: true, displayPhoneNumber: true, label: true },
+  });
+  res.json({ numbers });
 });
 
 /** GET /users/permissions — catalog + role defaults for the settings UI. */
@@ -62,6 +73,8 @@ const createSchema = z.object({
   managerId: z.string().nullable().optional(),
   team: z.string().optional(),
   permissions: z.array(z.string()).optional(),
+  /** Numbers this person works on; empty means every number. */
+  phoneNumberIds: z.array(z.string()).max(20).optional(),
 });
 
 /** POST /users — create a user (needs users.manage). */
@@ -85,6 +98,7 @@ usersRouter.post("/", requirePermission("users.manage"), async (req, res) => {
       managerId: d.managerId || null,
       team: d.team || null,
       permissions: (d.permissions || []).filter((p) => ALL_PERMISSIONS.includes(p)),
+      phoneNumberIds: d.phoneNumberIds || [],
     },
     select: publicSelect,
   });
@@ -100,6 +114,8 @@ const updateSchema = z.object({
   isActive: z.boolean().optional(),
   /** Empty array resets the user back to their role defaults. */
   permissions: z.array(z.string()).optional(),
+  /** Numbers this person works on; empty means every number. */
+  phoneNumberIds: z.array(z.string()).max(20).optional(),
 });
 
 /** PATCH /users/:id — edit profile, role and permissions (needs users.manage). */
@@ -140,6 +156,14 @@ usersRouter.patch("/:id", requirePermission("users.manage"), async (req, res) =>
   if (d.permissions !== undefined) {
     data.permissions = d.permissions.filter((p) => ALL_PERMISSIONS.includes(p));
   }
+  if (d.phoneNumberIds !== undefined) {
+    // Only numbers this workspace actually owns.
+    const owned = await prisma.phoneNumber.findMany({
+      where: { tenantId: req.auth!.tenantId, phoneNumberId: { in: d.phoneNumberIds } },
+      select: { phoneNumberId: true },
+    });
+    data.phoneNumberIds = owned.map((n) => n.phoneNumberId);
+  }
 
   const user = await prisma.user.update({
     where: { id: target.id },
@@ -148,7 +172,10 @@ usersRouter.patch("/:id", requirePermission("users.manage"), async (req, res) =>
   });
 
   // Access changes must not linger in an old session.
-  if (d.role !== undefined || d.permissions !== undefined || d.isActive === false) {
+  if (
+    d.role !== undefined || d.permissions !== undefined ||
+    d.phoneNumberIds !== undefined || d.isActive === false
+  ) {
     await revokeUserRefreshTokens(target.id);
   }
   audit(req, "user.update", { entity: "user", entityId: user.id, meta: { fields: Object.keys(data) } });

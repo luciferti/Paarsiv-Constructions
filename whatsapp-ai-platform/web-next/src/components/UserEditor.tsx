@@ -17,6 +17,7 @@ export interface UserRow {
   permissions: string[];
   effectivePermissions: string[];
   usesRoleDefaults: boolean;
+  phoneNumberIds?: string[];
   isActive: boolean;
 }
 interface PermGroup {
@@ -49,10 +50,16 @@ export default function UserEditor({ userId }: { userId?: string }) {
     role: "SALES" as "ADMIN" | "RM" | "SALES",
     team: "", managerId: "", isActive: true,
     permissions: [] as string[], usesRoleDefaults: true,
+    phoneNumberIds: [] as string[],
   });
+
   const patch = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
 
+  const [numbers, setNumbers] = useState<{ phoneNumberId: string; displayPhoneNumber: string; label?: string | null }[]>([]);
+
   const loadCatalog = useCallback(() => {
+    api.get<{ numbers: typeof numbers }>("/users/numbers")
+      .then((r) => setNumbers(r.numbers)).catch(() => {});
     api.get<{ groups: PermGroup[]; roleDefaults: Record<string, string[]> }>("/users/permissions")
       .then((r) => {
         setGroups(r.groups);
@@ -76,6 +83,7 @@ export default function UserEditor({ userId }: { userId?: string }) {
             isActive: u.isActive,
             permissions: u.usesRoleDefaults ? [...u.effectivePermissions] : [...u.permissions],
             usesRoleDefaults: u.usesRoleDefaults,
+            phoneNumberIds: [...(u.phoneNumberIds || [])],
           });
         }
       })
@@ -89,6 +97,15 @@ export default function UserEditor({ userId }: { userId?: string }) {
       usesRoleDefaults: false,
     });
   }
+  function toggleNumber(id: string) {
+    const has = form.phoneNumberIds.includes(id);
+    patch({
+      phoneNumberIds: has
+        ? form.phoneNumberIds.filter((n) => n !== id)
+        : [...form.phoneNumberIds, id],
+    });
+  }
+
   function resetToRole() {
     patch({ permissions: [...(roleDefaults[form.role] || [])], usesRoleDefaults: true });
   }
@@ -110,6 +127,7 @@ export default function UserEditor({ userId }: { userId?: string }) {
           managerId: form.managerId || null,
           isActive: form.isActive,
           permissions: form.usesRoleDefaults ? [] : form.permissions,
+          phoneNumberIds: form.phoneNumberIds,
         });
         if (form.password) await api.post(`/users/${userId}/password`, { password: form.password });
       } else {
@@ -121,6 +139,7 @@ export default function UserEditor({ userId }: { userId?: string }) {
           team: form.team || undefined,
           managerId: form.managerId || null,
           permissions: form.usesRoleDefaults ? [] : form.permissions,
+          phoneNumberIds: form.phoneNumberIds,
         });
       }
       router.push("/users");
@@ -199,6 +218,34 @@ export default function UserEditor({ userId }: { userId?: string }) {
                   </select>
                 </div>
               </div>
+              {numbers.length > 1 && (
+                <div className="rounded-xl border p-4">
+                  <div className="text-sm font-medium">WhatsApp numbers</div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {form.phoneNumberIds.length === 0
+                      ? "Every number — they see the whole inbox."
+                      : `Only the ${form.phoneNumberIds.length} ticked. Conversations on other numbers are invisible to them.`}
+                  </p>
+                  <div className="mt-3 space-y-1.5">
+                    {numbers.map((n) => (
+                      <label key={n.phoneNumberId}
+                        className="flex items-center gap-2.5 text-sm cursor-pointer rounded-lg px-2 py-1.5 hover:bg-muted">
+                        <input type="checkbox" checked={form.phoneNumberIds.includes(n.phoneNumberId)}
+                          onChange={() => toggleNumber(n.phoneNumberId)} />
+                        <span className="flex-1">{n.label || n.displayPhoneNumber}</span>
+                        <span className="text-[11px] text-muted-foreground">{n.displayPhoneNumber}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {form.phoneNumberIds.length > 0 && (
+                    <button className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2 mt-2"
+                      onClick={() => patch({ phoneNumberIds: [] })}>
+                      Give them every number
+                    </button>
+                  )}
+                </div>
+              )}
+
               {userId && (
                 <div className="flex items-center justify-between rounded-xl border px-4 py-3">
                   <div>

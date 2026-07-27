@@ -388,6 +388,9 @@ model User {
   presence     String   @default("offline")
   // Explicit permission list; empty means "use the role defaults".
   permissions  String[] @default([])
+  // Which WhatsApp numbers this person works on. Empty = every number, which
+  // is what an admin or a single-number workspace wants.
+  phoneNumberIds String[] @default([])
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
 
