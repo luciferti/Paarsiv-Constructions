@@ -100,6 +100,7 @@ export const openapiSpec = {
       get: { summary: "List journeys", responses: { "200": { description: "journeys[]" } } },
       post: { summary: "Create keyword journey", responses: { "201": { description: "journey" } } },
     },
+    "/reports/templates": { get: { summary: "How each template performs across every send: delivery, read, reply and opt-out rates", responses: { "200": { description: "templates[] with best/worst callouts" } } } },
     "/reports/health": { get: { summary: "Is anything wrong? Checks WhatsApp, campaigns, integrations and audience, each with the page that fixes it", responses: { "200": { description: "level, summary and checks[]" } } } },
     "/reports/overview": { get: { summary: "Audience + inbox + campaign-level report", responses: { "200": { description: "overview" } } } },
     "/api-keys": {

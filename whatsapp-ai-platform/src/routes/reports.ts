@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { requireAuth, requirePermission } from "../middleware/auth";
 import { healthReport } from "../services/health";
+import { templateReport } from "../services/templateStats";
 import { parseRange, dateFilter } from "../lib/dateRange";
 
 export const reportsRouter = Router();
@@ -19,6 +20,15 @@ reportsRouter.use(requireAuth);
 reportsRouter.get("/health", requirePermission("reports.view"), async (req, res) => {
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.auth!.tenantId } });
   res.json({ health: await healthReport(tenant) });
+});
+
+/**
+ * GET /reports/templates — how each template performs across every send it
+ * has been used in, including how many people left shortly after getting it.
+ */
+reportsRouter.get("/templates", requirePermission("reports.view"), async (req, res) => {
+  const range = parseRange(req);
+  res.json({ report: await templateReport(req.auth!.tenantId, range) });
 });
 
 reportsRouter.get("/agents", requirePermission("reports.agents"), async (req, res) => {

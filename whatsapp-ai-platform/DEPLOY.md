@@ -320,3 +320,19 @@ What it watches:
   something recent landing badly), and how much of the list is still reachable.
 
 Nothing here is sampled or estimated — each check reads the state it's about.
+
+## Which message actually works
+
+**Reports → Templates** compares templates rather than campaigns: how each one
+did across every send it has been used in — delivered, read, replied to, and
+the number nobody usually measures, **how many people opted out shortly after
+getting it**.
+
+Replies count someone writing back within 72 hours of receiving the message,
+opt-outs within 48. That is an association, not proof — they may have written
+about something else — and the screen says so. But a template with a high
+opt-out rate is worth re-reading before it goes to more people, and this is the
+only place that number is visible.
+
+"Most read", "most replies" and "costs you people" only consider templates
+delivered to at least twenty people; a single send to three proves nothing.

@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Activity, AlertTriangle, Bot, Check as CheckIcon, ChevronRight, Eye, LayoutDashboard,
-  Megaphone, MessageSquare, Send as SendIcon, ShieldAlert, Timer, TrendingUp, Users, UsersRound,
+  FileText, Megaphone, MessageSquare, Send as SendIcon, ShieldAlert, Timer, TrendingUp,
+  Users, UsersRound,
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart,
@@ -37,7 +38,20 @@ interface Breakdown {
   total: number;
 }
 
-type Section = "health" | "overview" | "campaigns" | "messaging" | "audience" | "agents";
+type Section = "health" | "overview" | "campaigns" | "templates" | "messaging" | "audience" | "agents";
+
+interface TemplateStat {
+  templateId: string; name: string; category: string; metaStatus: string | null;
+  campaigns: number; sent: number; delivered: number; read: number; failed: number;
+  deliveryRate: number; readRate: number; replies: number; replyRate: number;
+  optOuts: number; optOutRate: number; lastUsedAt: string | null;
+}
+interface TemplateReport {
+  templates: TemplateStat[];
+  windowHours: { reply: number; optOut: number };
+  best: { readRate?: TemplateStat; replyRate?: TemplateStat } | null;
+  worst: { optOutRate?: TemplateStat } | null;
+}
 
 type Level = "ok" | "warn" | "error";
 interface Check {
@@ -54,6 +68,7 @@ const SECTIONS: { v: Section; label: string; desc: string; icon: React.ElementTy
   { v: "health", label: "Health", desc: "Anything wrong?", icon: Activity },
   { v: "overview", label: "Overview", desc: "Headline numbers", icon: LayoutDashboard },
   { v: "campaigns", label: "Campaigns", desc: "Delivery and reads", icon: Megaphone },
+  { v: "templates", label: "Templates", desc: "Which message works", icon: FileText },
   { v: "messaging", label: "Messaging", desc: "Volume and response", icon: MessageSquare },
   { v: "audience", label: "Audience", desc: "Growth and segments", icon: Users },
   { v: "agents", label: "Agents", desc: "Team performance", icon: UsersRound },
@@ -107,6 +122,7 @@ export default function ReportsPage() {
   const router = useRouter();
   const [section, setSection] = useState<Section>("health");
   const [health, setHealth] = useState<Health | null>(null);
+  const [tpl, setTpl] = useState<TemplateReport | null>(null);
   const [range, setRange] = useState<DateRange>(DEFAULT_RANGE);
 
   const [data, setData] = useState<ReportOverview | null>(null);
@@ -123,6 +139,7 @@ export default function ReportsPage() {
     api.get<AgentReport>(`/reports/agents${q}`).then(setAgents).catch(() => {});
     api.get<{ series: SeriesPoint[] }>(`/reports/timeseries${q}`).then((r) => setSeries(r.series)).catch(() => {});
     api.get<Breakdown>(`/reports/breakdown${q}`).then(setBreakdown).catch(() => {});
+    api.get<{ report: TemplateReport }>(`/reports/templates${q}`).then((r) => setTpl(r.report)).catch(() => {});
     // Health isn't date-scoped — it's about right now.
     api.get<{ health: Health }>("/reports/health").then((r) => setHealth(r.health)).catch(() => {});
   }, [range]);
@@ -395,6 +412,117 @@ export default function ReportsPage() {
               <Card title="Delivery funnel" subtitle="Across every campaign in this period">{funnelChart}</Card>
               {campaignTable}
             </>
+          )}
+
+          {section === "templates" && (
+            tpl && tpl.templates.length > 0 ? (
+              <div className="space-y-4">
+                {/* the headline: what works, and what costs you people */}
+                {(tpl.best?.readRate || tpl.best?.replyRate || tpl.worst?.optOutRate) && (
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {tpl.best?.readRate && (
+                      <div className="rounded-xl border border-success/40 bg-success/10 p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-success">Most read</div>
+                        <div className="text-sm font-semibold mt-1 truncate">{tpl.best.readRate.name}</div>
+                        <div className="text-2xl font-semibold mt-1">{tpl.best.readRate.readRate}%</div>
+                      </div>
+                    )}
+                    {tpl.best?.replyRate && (
+                      <div className="rounded-xl border border-primary/40 bg-primary/10 p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-primary">Most replies</div>
+                        <div className="text-sm font-semibold mt-1 truncate">{tpl.best.replyRate.name}</div>
+                        <div className="text-2xl font-semibold mt-1">{tpl.best.replyRate.replyRate}%</div>
+                      </div>
+                    )}
+                    {tpl.worst?.optOutRate && (
+                      <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-destructive">Costs you people</div>
+                        <div className="text-sm font-semibold mt-1 truncate">{tpl.worst.optOutRate.name}</div>
+                        <div className="text-2xl font-semibold mt-1">{tpl.worst.optOutRate.optOutRate}% opted out</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="rounded-xl border bg-card shadow-card overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-[11px] text-muted-foreground uppercase tracking-wide border-b bg-muted/40">
+                        <th className="px-5 py-3 font-medium">Template</th>
+                        <th className="px-3 py-3 font-medium">Used in</th>
+                        <th className="px-3 py-3 font-medium">Delivered</th>
+                        <th className="px-3 py-3 font-medium">Read</th>
+                        <th className="px-3 py-3 font-medium">Replied</th>
+                        <th className="px-3 py-3 font-medium">Opted out</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tpl.templates.map((t) => (
+                        <tr key={t.templateId} className="border-b last:border-0 hover:bg-muted/40">
+                          <td className="px-5 py-3">
+                            <button className="font-medium text-primary hover:underline text-left"
+                              onClick={() => router.push(`/templates/${t.templateId}`)}>
+                              {t.name}
+                            </button>
+                            <div className="text-[11px] text-muted-foreground">
+                              {t.category.toLowerCase()}
+                              {t.lastUsedAt ? ` · last used ${new Date(t.lastUsedAt).toLocaleDateString()}` : ""}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-muted-foreground">
+                            {t.campaigns} campaign{t.campaigns === 1 ? "" : "s"}
+                          </td>
+                          <td className="px-3 py-3">
+                            {t.delivered.toLocaleString()}
+                            <span className="text-[11px] text-muted-foreground"> of {t.sent.toLocaleString()}</span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full bg-primary" style={{ width: `${t.readRate}%` }} />
+                              </div>
+                              <span className="text-xs">{t.readRate}%</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className={clsx("text-xs", t.replyRate >= 15 && "text-success font-medium")}>
+                              {t.replyRate}%
+                            </span>
+                            <span className="text-[11px] text-muted-foreground"> ({t.replies})</span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className={clsx(
+                              "text-xs",
+                              t.optOutRate >= 5 ? "text-destructive font-medium"
+                              : t.optOutRate > 0 ? "text-warning" : "text-muted-foreground"
+                            )}>
+                              {t.optOutRate}%
+                            </span>
+                            <span className="text-[11px] text-muted-foreground"> ({t.optOuts})</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Replies count someone writing back within {tpl.windowHours.reply} hours of receiving the message,
+                  and opt-outs within {tpl.windowHours.optOut}. That is an association, not proof — they may have
+                  written about something else entirely — but a template with a high opt-out rate is worth reading
+                  again before it goes out to more people. &ldquo;Most&rdquo; and &ldquo;costs you&rdquo; above only
+                  consider templates delivered to at least 20 people.
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed p-10 text-center">
+                <FileText className="w-6 h-6 mx-auto text-muted-foreground" />
+                <p className="text-sm font-medium mt-3">No templates have been sent yet</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Once a campaign goes out, this compares how each message performed.
+                </p>
+              </div>
+            )
           )}
 
           {section === "messaging" && (
