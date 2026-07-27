@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertTriangle, ArrowLeft, CheckCheck, Clock, Download, Eye, Loader2,
-  Search, Send as SendIcon, Users,
+  Pause, Play, Search, Send as SendIcon, Users,
 } from "lucide-react";
 import {
   Bar, BarChart, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -14,10 +14,16 @@ import { api } from "@/lib/api";
 import Pagination, { EMPTY_PAGE, type PageMeta } from "@/components/Pagination";
 import type { CampaignRecipient } from "@/lib/types";
 
+interface Preflight {
+  audience: number; rateLimit: number; estimatedMinutes: number;
+  dailyCeiling: number | null; overDailyLimit: boolean; warnings: string[];
+}
+
 interface CampaignDetail {
   id: string;
   name: string;
   status: string;
+  rateLimit?: number;
   totalCount: number;
   sentCount: number;
   deliveredCount: number;
@@ -65,12 +71,33 @@ export default function CampaignDetailPage() {
   const [recMeta, setRecMeta] = useState<PageMeta>(EMPTY_PAGE);
   const [page, setPage] = useState(1);
 
+  const [pre, setPre] = useState<Preflight | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
   const load = useCallback(() => {
     api.get<{ campaign: CampaignDetail; recipients: PageMeta }>(`/campaigns/${id}?page=${page}&pageSize=50`)
       .then((r) => { setData(r.campaign); setRecMeta(r.recipients); })
       .catch(() => {});
+    api.get<{ preflight: Preflight }>(`/campaigns/${id}/preflight`)
+      .then((r) => setPre(r.preflight)).catch(() => {});
   }, [id, page]);
   useEffect(load, [load]);
+
+  // While a send is in flight the numbers move — poll so the page tracks it.
+  useEffect(() => {
+    if (data?.status !== "SENDING") return;
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+  }, [data?.status, load]);
+
+  async function control(action: "pause" | "resume" | "cancel") {
+    setBusy(action);
+    try {
+      await api.post(`/campaigns/${id}/${action}`);
+      // Resume answers before it has sent anything; give it a moment.
+      setTimeout(load, action === "resume" ? 800 : 200);
+    } finally { setBusy(null); }
+  }
 
   const recipients = useMemo(() => {
     if (!data) return [];
@@ -117,6 +144,13 @@ export default function CampaignDetailPage() {
 
   const STATUSES = ["all", "READ", "DELIVERED", "SENT", "FAILED"];
 
+  const sending = data.status === "SENDING";
+  const paused = data.status === "PAUSED";
+  const done = data.sentCount + data.failedCount;
+  const pct = data.totalCount > 0 ? Math.round((done / data.totalCount) * 100) : 0;
+  const remaining = Math.max(0, data.totalCount - done);
+  const etaMinutes = data.rateLimit ? Math.ceil(remaining / data.rateLimit / 60) : null;
+
   return (
     <div className="flex-1 overflow-y-auto">
       {/* header */}
@@ -145,6 +179,69 @@ export default function CampaignDetailPage() {
       </div>
 
       <div className="p-8 space-y-6 max-w-6xl">
+        {/* live progress while a big send is in flight */}
+        {(sending || paused) && (
+          <section className="rounded-xl border bg-card shadow-card p-5">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-lg font-semibold">{done.toLocaleString()}</span>
+                  <span className="text-sm text-muted-foreground">
+                    of {data.totalCount.toLocaleString()} · {pct}%
+                  </span>
+                  {paused && <span className="text-[11px] px-2 py-0.5 rounded-full bg-warning/15 text-warning font-medium">paused</span>}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {sending && etaMinutes !== null && remaining > 0
+                    ? `${remaining.toLocaleString()} left · about ${etaMinutes < 60 ? `${etaMinutes} min` : `${Math.round(etaMinutes / 60)} hours`} at ${data.rateLimit}/s`
+                    : paused ? "Stopped where it was — resuming carries on from here, nobody is messaged twice."
+                    : "Working…"}
+                </p>
+              </div>
+              {sending && (
+                <button className="h-9 px-4 rounded-lg border text-sm font-medium hover:bg-muted disabled:opacity-50"
+                  disabled={busy !== null} onClick={() => control("pause")}>
+                  {busy === "pause" ? <Loader2 className="w-3.5 h-3.5 inline mr-1.5 animate-spin" /> : <Pause className="w-3.5 h-3.5 inline mr-1.5" />}
+                  Pause
+                </button>
+              )}
+              {paused && (
+                <button className="h-9 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
+                  disabled={busy !== null} onClick={() => control("resume")}>
+                  {busy === "resume" ? <Loader2 className="w-3.5 h-3.5 inline mr-1.5 animate-spin" /> : <Play className="w-3.5 h-3.5 inline mr-1.5" />}
+                  Resume
+                </button>
+              )}
+              <button className="h-9 px-4 rounded-lg border text-sm font-medium text-destructive hover:bg-muted disabled:opacity-50"
+                disabled={busy !== null}
+                onClick={() => confirm("Cancel this campaign? Messages already sent stay sent.") && control("cancel")}>
+                Cancel
+              </button>
+            </div>
+            <div className="mt-3 h-2 rounded-full bg-muted overflow-hidden">
+              <div className={clsx("h-full transition-all", paused ? "bg-warning" : "bg-primary")}
+                style={{ width: `${pct}%` }} />
+            </div>
+          </section>
+        )}
+
+        {/* what this send is up against, before it starts */}
+        {pre && pre.warnings.length > 0 && !sending && !paused && data.status !== "SENT" && (
+          <section className="rounded-xl border border-warning/40 bg-warning/10 p-4">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-warning mt-0.5 shrink-0" />
+              <div>
+                <div className="text-sm font-semibold text-warning">Before you send</div>
+                <ul className="mt-1 space-y-1">
+                  {pre.warnings.map((w) => (
+                    <li key={w} className="text-xs text-muted-foreground">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* stats */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Stat icon={Users} label="Audience" value={data.totalCount} />

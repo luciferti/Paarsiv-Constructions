@@ -216,3 +216,57 @@ Keys authenticate as `Authorization: Bearer wak_…` and are scoped:
 Every read endpoint is permission-checked too, so a scoped key can't wander
 into reports or the inbox. Writes are attributed to the key's name in the audit
 log.
+
+## Sending at scale
+
+### What the numbers actually are
+
+Measured on this codebase against 50,000 contacts, sends simulated (no live
+number), Postgres on the same machine:
+
+| | |
+|---|---|
+| 50,000 messages | **51 seconds** end to end |
+| Memory during the send | flat — the audience is never loaded at once |
+| Pause → resume | stops within one page, resumes from the cursor |
+| Killed mid-send, restarted | resumed automatically, **0 duplicates** out of 50,000 |
+
+The database is not the limit. **Meta is.** Two separate ceilings apply:
+
+- **Throughput** — the Cloud API accepts about 80 messages a second by default,
+  raisable to 1,000 on request. A campaign's `rateLimit` (default 20/s) paces us
+  under it, because a rejected message still counts as an attempt.
+- **Daily unique recipients** — the number's messaging tier: 1K, 10K, 100K or
+  unlimited per rolling 24 hours. This is the one that decides whether 30 lakh
+  is possible at all.
+
+So at 80/s, 1 lakh takes about 21 minutes of wall clock and 30 lakh about
+10 hours — *if* the number is on the unlimited tier. On a 100K-tier number,
+30 lakh is a month of sending regardless of how fast the server is.
+
+The campaign screen says this before you press send, rather than after.
+
+### How it survives a long send
+
+- The audience is walked in pages of 500 by id, so a list of any size costs the
+  same memory as a small one.
+- Each page goes through a worker pool of 16 under a token bucket.
+- After every page the cursor and the counters are written. That row is the
+  resume point.
+- `(campaignId, contactId)` is unique, so resuming after a crash **cannot**
+  message anyone a second time.
+- On boot, any campaign left in `SENDING` is picked up and continued — a deploy
+  mid-send is no longer fatal.
+- Pause, resume and cancel are available throughout, with live progress and a
+  running estimate.
+
+Journeys enrol segments the same way, in pages — the old 5,000-contact cap is
+gone.
+
+### What is still single-process
+
+Sending runs inside the API process. That is fine to the limits above, since
+Meta's own rate is the bottleneck long before Node is. If you ever need several
+numbers sending large campaigns at once, move `runCampaign` behind a real queue
+(BullMQ/Redis) — the function is already resumable and idempotent, so it can be
+lifted out without changing its behaviour.

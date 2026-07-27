@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { runCampaign } from "./campaigns";
+import { resumeInterruptedCampaigns, runCampaign } from "./campaigns";
 
 const POLL_MS = 60_000;
 
@@ -9,6 +9,12 @@ const POLL_MS = 60_000;
  * without changing the API surface.)
  */
 export function startScheduler() {
+  // A deploy or crash mid-send would otherwise strand a campaign in SENDING
+  // forever; each one carries on from the cursor it last wrote.
+  resumeInterruptedCampaigns().catch((e) =>
+    console.error("[scheduler] resume sweep failed:", e?.message || e)
+  );
+
   setInterval(async () => {
     try {
       const due = await prisma.campaign.findMany({

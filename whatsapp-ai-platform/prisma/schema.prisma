@@ -691,13 +691,18 @@ model Campaign {
   segmentId      String?
   // Which of our numbers this went out from — blank means the default.
   phoneNumberId  String    @default("")
-  status         String    @default("DRAFT") // DRAFT | SENDING | SENT | FAILED
+  status         String    @default("DRAFT") // DRAFT|SCHEDULED|QUEUED|SENDING|PAUSED|SENT|FAILED|CANCELLED
   scheduledAt    DateTime?
   totalCount     Int       @default(0)
   sentCount      Int       @default(0)
   deliveredCount Int       @default(0)
   readCount      Int       @default(0)
   failedCount    Int       @default(0)
+  // How far the sender has got, so a restart picks up instead of starting over.
+  cursor         String?
+  // Messages per second for this send; Meta's Cloud API default ceiling is 80.
+  rateLimit      Int       @default(20)
+  error          String?
   createdAt      DateTime  @default(now())
   startedAt      DateTime?
   finishedAt     DateTime?
@@ -720,6 +725,7 @@ model CampaignRecipient {
   // Meta's message id — how delivered/read webhooks find this row again.
   waMessageId String?
 
+  @@unique([campaignId, contactId])
   @@index([campaignId])
   @@index([waMessageId])
 }

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { requireAuth, requirePermission } from "../middleware/auth";
 import { segmentWhere, type SegmentRules } from "../lib/segment";
-import { runCampaign } from "../services/campaigns";
+import { preflight, runCampaign } from "../services/campaigns";
 import { audit } from "../lib/audit";
 import { parseRange, dateFilter } from "../lib/dateRange";
 import { pageMeta, parsePaging } from "../lib/pagination";
@@ -106,6 +106,82 @@ campaignsRouter.post("/", requirePermission("campaigns.create"), async (req, res
   res.status(201).json({ campaign });
 });
 
+/**
+ * GET /campaigns/:id/preflight — what this send is about to do, before it
+ * does it: audience size, how long it will take, and whether it exceeds the
+ * number's 24-hour ceiling.
+ */
+campaignsRouter.get("/:id/preflight", requirePermission("campaigns.view"), async (req, res) => {
+  const campaign = await prisma.campaign.findFirst({
+    where: { id: req.params.id, tenantId: req.auth!.tenantId },
+  });
+  if (!campaign) return res.status(404).json({ error: "not found" });
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.auth!.tenantId } });
+  res.json({ preflight: await preflight(tenant, campaign) });
+});
+
+const rateSchema = z.object({ rateLimit: z.number().int().min(1).max(1000) });
+
+/** PATCH /campaigns/:id/rate — how fast to send; takes effect on the next run. */
+campaignsRouter.patch("/:id/rate", requirePermission("campaigns.send"), async (req, res) => {
+  const parsed = rateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const c = await prisma.campaign.findFirst({
+    where: { id: req.params.id, tenantId: req.auth!.tenantId },
+  });
+  if (!c) return res.status(404).json({ error: "not found" });
+  const campaign = await prisma.campaign.update({
+    where: { id: c.id },
+    data: { rateLimit: parsed.data.rateLimit },
+  });
+  res.json({ campaign });
+});
+
+/**
+ * POST /campaigns/:id/pause — stop after the page in flight. The cursor stays,
+ * so resuming carries on rather than starting again.
+ */
+campaignsRouter.post("/:id/pause", requirePermission("campaigns.send"), async (req, res) => {
+  const c = await prisma.campaign.findFirst({
+    where: { id: req.params.id, tenantId: req.auth!.tenantId },
+  });
+  if (!c) return res.status(404).json({ error: "not found" });
+  if (c.status !== "SENDING") return res.status(409).json({ error: `campaign is ${c.status}` });
+  const campaign = await prisma.campaign.update({ where: { id: c.id }, data: { status: "PAUSED" } });
+  audit(req, "campaign.pause", { entity: "campaign", entityId: c.id });
+  res.json({ campaign });
+});
+
+/** POST /campaigns/:id/resume — carry on from the cursor. */
+campaignsRouter.post("/:id/resume", requirePermission("campaigns.send"), async (req, res) => {
+  const c = await prisma.campaign.findFirst({
+    where: { id: req.params.id, tenantId: req.auth!.tenantId },
+  });
+  if (!c) return res.status(404).json({ error: "not found" });
+  if (c.status !== "PAUSED") return res.status(409).json({ error: `campaign is ${c.status}` });
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.auth!.tenantId } });
+  audit(req, "campaign.resume", { entity: "campaign", entityId: c.id });
+  res.json({ ok: true, status: "SENDING" });
+  runCampaign(tenant, c.id).catch((e) => console.error("[campaign] resume error:", e?.message || e));
+});
+
+/** POST /campaigns/:id/cancel — stop for good; what already went stays sent. */
+campaignsRouter.post("/:id/cancel", requirePermission("campaigns.send"), async (req, res) => {
+  const c = await prisma.campaign.findFirst({
+    where: { id: req.params.id, tenantId: req.auth!.tenantId },
+  });
+  if (!c) return res.status(404).json({ error: "not found" });
+  if (!["SENDING", "PAUSED", "SCHEDULED", "QUEUED"].includes(c.status)) {
+    return res.status(409).json({ error: `campaign is ${c.status}` });
+  }
+  const campaign = await prisma.campaign.update({
+    where: { id: c.id },
+    data: { status: "CANCELLED", finishedAt: new Date() },
+  });
+  audit(req, "campaign.cancel", { entity: "campaign", entityId: c.id });
+  res.json({ campaign });
+});
+
 /** POST /campaigns/:id/send — start sending (admin/RM). */
 campaignsRouter.post("/:id/send", requirePermission("campaigns.send"), async (req, res) => {
   const campaign = await prisma.campaign.findFirst({
@@ -113,6 +189,7 @@ campaignsRouter.post("/:id/send", requirePermission("campaigns.send"), async (re
   });
   if (!campaign) return res.status(404).json({ error: "not found" });
   if (campaign.status === "SENDING") return res.status(409).json({ error: "already sending" });
+  if (campaign.status === "SENT") return res.status(409).json({ error: "already sent" });
 
   const tenant = await prisma.tenant.findUnique({ where: { id: req.auth!.tenantId } });
   if (!tenant) return res.status(404).json({ error: "tenant missing" });

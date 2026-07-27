@@ -266,21 +266,37 @@ export async function runJourneyForSegment(
       { optedIn: true },
     ],
   };
-  const contacts = await prisma.contact.findMany({ where, take: 5000 });
-
   const nodes = (journey.nodes as GraphNodeLike[]) || [];
   const edges = (journey.edges as GraphEdgeLike[]) || [];
   if (nodes.length === 0) return { enrolled: 0 };
 
-  for (const c of contacts) {
-    // Sequential so a big segment doesn't hammer the send path.
-    await runJourneyGraph(tenant, nodes, edges, {
-      phone: c.phone, name: c.name, phoneNumberId: journey.phoneNumberId || undefined,
-    }).catch((e) =>
-      console.error("[journey] segment run error:", e?.message || e)
-    );
+  // Walked in pages by id, like campaigns — a segment of any size enrolls
+  // without the whole audience being held in memory at once.
+  const PAGE = 500;
+  let cursor: string | null = null;
+  let enrolled = 0;
+
+  for (;;) {
+    const page: { id: string; phone: string; name: string | null }[] =
+      await prisma.contact.findMany({
+        where,
+        orderBy: { id: "asc" },
+        take: PAGE,
+        select: { id: true, phone: true, name: true },
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+    if (page.length === 0) break;
+
+    for (const c of page) {
+      // Sequential so a big segment doesn't hammer the send path.
+      await runJourneyGraph(tenant, nodes, edges, {
+        phone: c.phone, name: c.name, phoneNumberId: journey.phoneNumberId || undefined,
+      }).catch((e) => console.error("[journey] segment run error:", e?.message || e));
+      enrolled++;
+    }
+    cursor = page[page.length - 1].id;
   }
-  return { enrolled: contacts.length };
+  return { enrolled };
 }
 
 /**
