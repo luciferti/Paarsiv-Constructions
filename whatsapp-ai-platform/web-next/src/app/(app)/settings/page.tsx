@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Code2, GitMerge, Plug, PlugZap, ScrollText, ShieldCheck, Webhook } from "lucide-react";
+import { ArrowRight, Code2, GitMerge, Plug, PlugZap, ScrollText, ShieldCheck, Terminal, Webhook } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import type { ContactField } from "@/lib/types";
@@ -213,6 +213,10 @@ export default function SettingsPage() {
               {
                 to: "/settings/api", icon: Code2, title: "API",
                 desc: "Keys with scopes, plus ready-made calls for contacts, segments, templates, media, campaigns and users.",
+              },
+              {
+                to: "/settings/developer", icon: Terminal, title: "Developer console",
+                desc: "Call any third-party API from here — try it live, then run it inside a journey.",
               },
             ].map((card) => {
               const Icon = card.icon;

@@ -158,6 +158,28 @@ listed with their status code, attempt count and error, and **Test** sends a
 real signed request down the same path so setup can be proven before anything
 depends on it.
 
+### Developer console (calling somebody else's API)
+
+Connectors and event webhooks both wait for something to happen. The console
+is for when the platform needs to **ask** — look up a loan status mid-chat,
+check stock, raise a ticket.
+
+**Settings → Integrations → Developer console.** Register an API once (base URL
+plus how it authenticates: an API key header, a bearer token, or basic), then
+save named calls against it. A call's path and body can carry `{{tokens}}` —
+`{{name}}`, `{{phone}}`, any custom field — filled from the contact it runs for,
+and a response-mapping like `{ "data.status": "loan_status" }` copies pieces of
+the answer back onto that contact.
+
+**Send** runs it live and shows the status, timing, exactly what was sent, the
+raw response and what got written back. **Dry run** does the same without
+touching the contact. Then drop a **Call an API** block into a journey, pick the
+saved call, and a Condition block further down can branch on whatever it wrote.
+
+Secrets are stored server-side and never returned to the browser. Requests to
+private and loopback addresses are refused, so a saved call can't be pointed at
+the infrastructure the platform runs on.
+
 ### API (everything out and in)
 
 **Settings → Integrations → API** has the base URL, the auth header, key

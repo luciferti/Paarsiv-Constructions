@@ -124,6 +124,7 @@ model Tenant {
   apiKeys         ApiKey[]
   connectors      Connector[]
   eventHooks      EventHook[]
+  externalApis    ExternalApi[]
   auditLogs       AuditLog[]
 }
 
@@ -232,6 +233,65 @@ model EventDelivery {
   createdAt  DateTime  @default(now())
 
   @@index([hookId, createdAt])
+}
+
+// ---------------- ExternalApi (we call THEM: any third-party HTTP API) ------
+// The developer console. A workspace describes an API once — base URL, auth,
+// headers — then saves named requests that journeys and automations can run.
+model ExternalApi {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  baseUrl     String
+  authType    String   @default("none") // none | header | bearer | basic
+  authName    String?  // header name when authType = header, e.g. X-Api-Key
+  authValue   String?  // secret; write-only, never returned to the browser
+  headers     Json?    // extra static headers { "Accept": "application/json" }
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  requests ExternalApiRequest[]
+
+  @@index([tenantId])
+}
+
+model ExternalApiRequest {
+  id           String      @id @default(cuid())
+  apiId        String
+  api          ExternalApi @relation(fields: [apiId], references: [id], onDelete: Cascade)
+  name         String
+  method       String      @default("GET") // GET | POST | PUT | PATCH | DELETE
+  path         String      @default("/")   // supports {{tokens}}
+  bodyTemplate String?     // JSON string, supports {{tokens}}
+  // Where to put pieces of the response: { "data.status": "loan_status" }
+  // key = dot path in the response, value = contact attribute to write.
+  saveTo       Json?
+  lastStatus   Int?
+  lastError    String?
+  lastRunAt    DateTime?
+  createdAt    DateTime    @default(now())
+
+  logs ExternalApiLog[]
+
+  @@index([apiId])
+}
+
+model ExternalApiLog {
+  id         String             @id @default(cuid())
+  requestId  String
+  request    ExternalApiRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  status     String             @default("ok") // ok | failed
+  statusCode Int?
+  durationMs Int?
+  error      String?
+  // Trimmed for storage; the console shows the live response in full.
+  requestUrl String?
+  response   String?
+  ranBy      String?            // console | journey
+  createdAt  DateTime           @default(now())
+
+  @@index([requestId, createdAt])
 }
 
 // ---------------- AuditLog ----------------

@@ -223,6 +223,38 @@ export default function ConnectorsPage() {
             </p>
           </div>
 
+          <section className="rounded-xl border bg-muted/20 p-5">
+            <h3 className="text-sm font-medium">What a connector actually does</h3>
+            <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+              Every system here can already shout &ldquo;something happened&rdquo; at a web address —
+              Shopify calls it a webhook, Zoho calls it a workflow action. A connector gives you
+              that address. Paste it into their settings once and you are done: nobody exports a
+              spreadsheet again, and nothing has to be imported by hand.
+            </p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              {[
+                { n: "1", t: "They send", d: "Order paid in Shopify — their webhook posts the order to your URL." },
+                { n: "2", t: "We read it", d: "Phone, name, city and email are pulled out, wherever that product puts them." },
+                { n: "3", t: "It lands here", d: "Contact created or filled in, tagged, and pulled into your welcome journey." },
+              ].map((s) => (
+                <div key={s.n} className="rounded-lg border bg-card p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-primary/15 text-primary text-[11px] font-semibold grid place-items-center">
+                      {s.n}
+                    </span>
+                    <span className="text-xs font-medium">{s.t}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">{s.d}</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
+              An existing contact is <span className="font-medium">filled in, never overwritten</span> — what your
+              agents typed outranks what a CRM thinks. Anything without a usable phone number is
+              recorded as skipped, with the reason, rather than disappearing quietly.
+            </p>
+          </section>
+
           {/* installed */}
           {connectors.length > 0 && (
             <section className="space-y-3">
@@ -330,8 +362,9 @@ export default function ConnectorsPage() {
           <div className="pt-4 border-t">
             <h2 className="text-[15px] font-semibold">Events going out</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              We tell your systems what happened here — a reply, an opt-out, a finished campaign.
-              Each delivery is signed, retried three times, and logged.
+              The other direction. Give us one of your addresses and we post to it whenever
+              something happens here — a customer replies, someone opts out, a campaign finishes —
+              so your CRM knows without anyone checking. Signed, retried three times, and logged.
             </p>
           </div>
 
@@ -466,8 +499,13 @@ export default function ConnectorsPage() {
               <h3 className="text-sm font-medium">Need a connector that isn&apos;t here?</h3>
               <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                 If your system can post JSON to a URL, the <span className="font-medium">Custom</span> connector
-                above already covers it. For anything deeper — a two-way sync, an OAuth app, a product we
-                don&apos;t list — talk to the support team and we&apos;ll build it with you.
+                above already covers it. If you need to <span className="font-medium">call</span> an API rather than
+                be called by one — look something up mid-conversation, check a balance, create a ticket —
+                that&apos;s the{" "}
+                <button className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() => router.push("/settings/developer")}>developer console</button>.
+                For anything deeper — a two-way sync, an OAuth app, a product we don&apos;t list — talk to
+                the support team and we&apos;ll build it with you.
               </p>
               <a href="mailto:support@example.com?subject=Custom%20connector%20request"
                 className={clsx(btnGhost, "mt-3 inline-flex items-center")}>

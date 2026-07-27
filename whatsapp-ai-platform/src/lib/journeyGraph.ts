@@ -12,11 +12,12 @@ export interface GraphEdge {
 }
 
 export interface JourneyStep {
-  type: "message" | "wait" | "handoff" | "tag";
+  type: "message" | "wait" | "handoff" | "tag" | "api_call";
   text?: string;
   templateId?: string;
   hours?: number;
   tag?: string;
+  apiRequestId?: string;
 }
 
 /**
@@ -61,6 +62,11 @@ export function graphToSteps(nodes: GraphNode[], edges: GraphEdge[]): JourneySte
       steps.push({ type: "handoff" });
     } else if (kind === "tag") {
       steps.push({ type: "tag", tag: typeof d.tag === "string" ? d.tag : undefined });
+    } else if (kind === "api_call") {
+      steps.push({
+        type: "api_call",
+        apiRequestId: typeof d.apiRequestId === "string" ? d.apiRequestId : undefined,
+      });
     }
 
     current = outgoing.get(current)?.[0];

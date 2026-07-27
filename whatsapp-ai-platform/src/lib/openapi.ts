@@ -112,6 +112,13 @@ export const openapiSpec = {
     },
     "/connectors/{id}/rotate": { post: { summary: "New webhook secret; the old URL stops working", responses: { "200": { description: "connector" } } } },
     "/connectors/{id}/events": { get: { summary: "Last 50 events with what each one did", responses: { "200": { description: "events[]" } } } },
+    "/external-apis": {
+      get: { summary: "Registered third-party APIs and their saved requests (secrets withheld)", responses: { "200": { description: "apis[]" } } },
+      post: { summary: "Register an API: base URL + how it authenticates", responses: { "201": { description: "api" } } },
+    },
+    "/external-apis/{id}/requests": { post: { summary: "Save a call against an API — path/body support {{tokens}}", responses: { "201": { description: "request" } } } },
+    "/external-apis/requests/{requestId}/run": { post: { summary: "Run it. `contactId` fills the tokens, `dryRun` skips writing back", responses: { "200": { description: "status, timing, response, and what was saved" } } } },
+    "/external-apis/requests/{requestId}/logs": { get: { summary: "Last 30 runs", responses: { "200": { description: "logs[]" } } } },
     "/event-hooks": {
       get: { summary: "Outbound subscriptions + the event catalog", responses: { "200": { description: "hooks[] + catalog" } } },
       post: { summary: "Send events to a URL of yours; omit `events` for all of them", responses: { "201": { description: "hook incl. its signing secret" } } },

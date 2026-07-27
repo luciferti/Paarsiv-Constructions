@@ -9,13 +9,13 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import {
-  ArrowLeft, GitBranch, Loader2, MessageSquare, Plus, Tag as TagIcon, Timer, Trash2, UserCheck, Users, Zap,
+  ArrowLeft, GitBranch, Globe, Loader2, MessageSquare, Plus, Tag as TagIcon, Timer, Trash2, UserCheck, Users, Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import type { InboxNumber, Journey, Segment, Template } from "@/lib/types";
 
-type Kind = "trigger" | "message" | "wait" | "handoff" | "tag" | "condition";
+type Kind = "trigger" | "message" | "wait" | "handoff" | "tag" | "condition" | "api_call";
 
 interface NodeData {
   kind: Kind;
@@ -30,6 +30,8 @@ interface NodeData {
   segmentName?: string;
   check?: string;   // condition: has_tag | text_contains | replied | opted_in
   value?: string;   // condition value
+  apiRequestId?: string; // api_call: a saved request from the developer console
+  apiRequestName?: string;
 }
 
 const PALETTE: { kind: Kind; label: string; desc: string; icon: React.ElementType; color: string }[] = [
@@ -39,9 +41,11 @@ const PALETTE: { kind: Kind; label: string; desc: string; icon: React.ElementTyp
   { kind: "handoff", label: "Handoff to agent", desc: "Stop AI, notify team", icon: UserCheck, color: "text-success" },
   { kind: "tag", label: "Add tag", desc: "Tag the contact", icon: TagIcon, color: "text-muted-foreground" },
   { kind: "condition", label: "Condition", desc: "Split into yes / no paths", icon: GitBranch, color: "text-warning" },
+  { kind: "api_call", label: "Call an API", desc: "Fetch or push to another system", icon: Globe, color: "text-primary" },
 ];
 
 const META: Record<Kind, { icon: React.ElementType; label: string; ring: string; badge: string }> = {
+  api_call: { icon: Globe, label: "API call", ring: "border-primary", badge: "bg-primary/15 text-primary" },
   trigger: { icon: Zap, label: "Trigger", ring: "border-primary", badge: "bg-primary/15 text-primary" },
   message: { icon: MessageSquare, label: "Send message", ring: "border-border", badge: "bg-accent text-accent-foreground" },
   wait: { icon: Timer, label: "Wait", ring: "border-border", badge: "bg-warning/15 text-warning" },
@@ -79,6 +83,8 @@ function FlowNode({ data, selected }: NodeProps<NodeData>) {
     : data.kind === "handoff" ? "conversation goes to a human"
     : data.kind === "condition"
       ? `${CHECKS.find((c) => c.v === (data.check || "has_tag"))?.label || "check"}${data.value ? ` “${data.value}”` : ""}`
+    : data.kind === "api_call"
+      ? (data.apiRequestName || "pick a saved request")
     : data.tag ? `tag: ${data.tag}` : "set a tag";
 
   return (
@@ -126,6 +132,7 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
   const [name, setName] = useState("");
   const [numbers, setNumbers] = useState<InboxNumber[]>([]);
   const [phoneNumberId, setPhoneNumberId] = useState("");
+  const [apiRequests, setApiRequests] = useState<{ id: string; label: string }[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [loading, setLoading] = useState(!!journeyId);
@@ -145,6 +152,12 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
     api.get<{ segments: Segment[] }>("/segments").then((r) => setSegments(r.segments)).catch(() => {});
     api.get<{ numbers: InboxNumber[] }>("/conversations/numbers")
       .then((r) => setNumbers(r.numbers.filter((n) => n.active)))
+      .catch(() => {});
+    // Saved calls from the developer console, for the "Call an API" block.
+    api.get<{ apis: { name: string; requests: { id: string; name: string }[] }[] }>("/external-apis")
+      .then((r) => setApiRequests(
+        r.apis.flatMap((a) => a.requests.map((q) => ({ id: q.id, label: `${a.name} · ${q.name}` })))
+      ))
       .catch(() => {});
     if (!journeyId) return;
     api.get<{ journeys: Journey[] }>("/journeys")
@@ -208,6 +221,7 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
     const id = `${kind}-${Date.now()}`;
     const data: NodeData =
       kind === "wait" ? { kind, hours: 24 }
+      : kind === "api_call" ? { kind, apiRequestId: "" }
       : kind === "trigger" ? { kind, triggerType: "keyword", triggerValue: "" }
       : kind === "condition" ? { kind, check: "has_tag", value: "" }
       : { kind };
@@ -501,6 +515,31 @@ function BuilderInner({ journeyId }: { journeyId?: string }) {
                     Connect the green dot for the yes path and the red dot for the no path.
                   </p>
                 </>
+              )}
+
+              {selected.data.kind === "api_call" && (
+                <div>
+                  <label className="text-xs text-muted-foreground">Which call?</label>
+                  <select className={clsx(input, "mt-1")} value={selected.data.apiRequestId || ""}
+                    onChange={(e) => {
+                      const opt = apiRequests.find((r) => r.id === e.target.value);
+                      updateSelected({ apiRequestId: e.target.value, apiRequestName: opt?.label });
+                    }}>
+                    <option value="">Choose a saved request</option>
+                    {apiRequests.map((r) => (
+                      <option key={r.id} value={r.id}>{r.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    Runs for the contact this journey is on. Anything the request saves onto them can
+                    be checked by a Condition block further down.
+                  </p>
+                  {apiRequests.length === 0 && (
+                    <p className="text-[11px] text-warning mt-1.5">
+                      Nothing saved yet — build a call in Settings → Developer console first.
+                    </p>
+                  )}
+                </div>
               )}
 
               {selected.data.kind === "tag" && (

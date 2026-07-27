@@ -2,14 +2,16 @@ import { prisma } from "../lib/prisma";
 import { segmentWhere, type SegmentRules } from "../lib/segment";
 import { fillTokens } from "../lib/tokens";
 import { sendOutbound } from "./outbound";
+import { runSavedRequest } from "./externalApis";
 import type { Tenant } from "@prisma/client";
 
 export interface JourneyStep {
-  type: "message" | "wait" | "handoff" | "tag";
+  type: "message" | "wait" | "handoff" | "tag" | "api_call";
   text?: string; // message step
   templateId?: string; // message step (alternative to text)
   hours?: number; // wait step
   tag?: string; // tag step
+  apiRequestId?: string; // api_call step — a saved request from the console
 }
 
 const MAX_WAIT_MS = 60_000; // cap real waits in this simplified runner
@@ -49,6 +51,18 @@ export async function runJourney(
       // Messages leave from the journey's channel so the whole flow stays in
       // one thread on the customer's phone.
       if (text) await sendOutbound(tenant, ctx.phone, text, "AI", ctx.phoneNumberId);
+      continue;
+    }
+    if (step.type === "api_call" && step.apiRequestId) {
+      // Whatever the API answers can be written onto the contact, so a later
+      // condition step can branch on it.
+      const contact = await prisma.contact.findFirst({
+        where: { tenantId: tenant.id, phone: ctx.phone },
+      });
+      const result = await runSavedRequest(tenant.id, step.apiRequestId, { contact });
+      if (result && !result.ok) {
+        console.warn(`[journey] api call failed: ${result.error || result.statusCode}`);
+      }
       continue;
     }
     if (step.type === "handoff") {
@@ -208,6 +222,8 @@ export async function runJourneyGraph(
       kind === "wait" ? { type: "wait", hours: Number(data.hours) || 0 }
       : kind === "handoff" ? { type: "handoff" }
       : kind === "tag" ? { type: "tag", tag: typeof data.tag === "string" ? data.tag : undefined }
+      : kind === "api_call"
+        ? { type: "api_call", apiRequestId: typeof data.apiRequestId === "string" ? data.apiRequestId : undefined }
       : {
           type: "message",
           text: typeof data.text === "string" ? data.text : undefined,
