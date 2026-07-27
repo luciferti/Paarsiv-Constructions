@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Code2, GitMerge, Plug, PlugZap, ScrollText, ShieldCheck, Terminal, Webhook } from "lucide-react";
+import { ArrowRight, Code2, Gauge, GitMerge, Plug, PlugZap, ScrollText, ShieldCheck, Terminal, Webhook } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import type { ContactField } from "@/lib/types";
@@ -71,7 +71,7 @@ interface WaStatus {
   error?: string | null;
 }
 
-type Tab = "whatsapp" | "integrations" | "merge" | "consent" | "audit" | "webhooks";
+type Tab = "whatsapp" | "integrations" | "sending" | "merge" | "consent" | "audit" | "webhooks";
 
 /** Comma-separated editing for a keyword list — one input, no chip fiddling. */
 function KeywordInput({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder: string }) {
@@ -94,6 +94,8 @@ export default function SettingsPage() {
   const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
   const [keyName, setKeyName] = useState("");
   const [freshSecret, setFreshSecret] = useState<string | null>(null);
+  const [sendRate, setSendRate] = useState(60);
+  const [rateSaved, setRateSaved] = useState(false);
   const [rules, setRules] = useState<MergeRules>(DEFAULT_RULES);
   const [consent, setConsent] = useState<ConsentRules>(DEFAULT_CONSENT);
   const [fields, setFields] = useState<ContactField[]>([]);
@@ -104,10 +106,11 @@ export default function SettingsPage() {
     api.get<{ keys: ApiKeyRow[] }>("/api-keys").then((r) => setKeys(r.keys)).catch(() => {});
     api.get<{ logs: AuditRow[] }>("/logs/audit").then((r) => setAudit(r.logs)).catch(() => {});
     api.get<{ logs: WebhookRow[] }>("/logs/webhooks").then((r) => setWebhooks(r.logs)).catch(() => {});
-    api.get<{ tenant: { mergeRules?: Partial<MergeRules> | null; consentRules?: Partial<ConsentRules> | null } }>("/settings")
+    api.get<{ tenant: { mergeRules?: Partial<MergeRules> | null; consentRules?: Partial<ConsentRules> | null; sendRateLimit?: number } }>("/settings")
       .then((r) => {
         setRules({ ...DEFAULT_RULES, ...(r.tenant.mergeRules || {}) });
         setConsent({ ...DEFAULT_CONSENT, ...(r.tenant.consentRules || {}) });
+        if (typeof r.tenant.sendRateLimit === "number") setSendRate(r.tenant.sendRateLimit);
       }).catch(() => {});
     api.get<{ fields: ContactField[] }>("/contact-fields").then((r) => setFields(r.fields)).catch(() => {});
     api.get<{ status: WaStatus }>("/whatsapp/status").then((r) => setWa(r.status)).catch(() => {});
@@ -118,6 +121,12 @@ export default function SettingsPage() {
     await api.patch("/settings", { mergeRules: rules });
     setRulesSaved(true);
     setTimeout(() => setRulesSaved(false), 1800);
+  }
+
+  async function saveRate() {
+    await api.patch("/settings", { sendRateLimit: sendRate });
+    setRateSaved(true);
+    setTimeout(() => setRateSaved(false), 1800);
   }
 
   async function saveConsent() {
@@ -137,6 +146,7 @@ export default function SettingsPage() {
   const TABS: { v: Tab; label: string; icon: React.ElementType }[] = [
     { v: "whatsapp", label: "WhatsApp", icon: PlugZap },
     { v: "integrations", label: "Integrations", icon: Plug },
+    { v: "sending", label: "Sending speed", icon: Gauge },
     { v: "merge", label: "Merge rules", icon: GitMerge },
     { v: "consent", label: "Opt-out rules", icon: ShieldCheck },
     { v: "audit", label: "Audit log", icon: ScrollText },
@@ -242,6 +252,51 @@ export default function SettingsPage() {
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {tab === "sending" && (
+          <div className="max-w-2xl">
+            <div className="rounded-xl border bg-card shadow-card p-6 space-y-5">
+              <div>
+                <h2 className="text-[15px] font-semibold">How fast this workspace sends</h2>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  One ceiling for everything — campaigns, journeys and scripts all draw from it. Without
+                  it, two campaigns at 40 a second would put 80 through the same number and start
+                  collecting rate-limit rejections from Meta.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Messages per second</label>
+                <div className="mt-2 flex items-center gap-3">
+                  <input type="range" min={1} max={200} value={sendRate} className="flex-1"
+                    onChange={(e) => setSendRate(Number(e.target.value))} />
+                  <input type="number" min={1} max={1000} value={sendRate}
+                    className={clsx(inputCls, "w-24")}
+                    onChange={(e) => setSendRate(Math.max(1, Math.min(1000, Number(e.target.value))))} />
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-2">
+                  {sendRate <= 80
+                    ? `About ${(sendRate * 3600).toLocaleString()} an hour. Within Meta's default allowance of 80 a second.`
+                    : `About ${(sendRate * 3600).toLocaleString()} an hour. Above Meta's default 80 a second — only set this if they have raised your limit.`}
+                </p>
+              </div>
+
+              <div className="rounded-lg border bg-muted/30 p-4">
+                <div className="text-xs font-medium mb-1.5">Worth knowing</div>
+                <ul className="space-y-1 text-[11px] text-muted-foreground leading-relaxed">
+                  <li>· A campaign can be slower than this, never faster.</li>
+                  <li>· Meta separately caps how many <em>different</em> people a number may message in 24 hours, by tier — speed doesn&apos;t change that.</li>
+                  <li>· A change applies to the next message, not just after a restart.</li>
+                </ul>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button className={btnPri} onClick={saveRate}>Save</button>
+                {rateSaved && <span className="text-xs text-primary font-medium">Saved ✓</span>}
+              </div>
+            </div>
           </div>
         )}
 

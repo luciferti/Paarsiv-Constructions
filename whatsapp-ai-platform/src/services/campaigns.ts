@@ -6,7 +6,7 @@ import { emitRealtime } from "../lib/events";
 import { resolveSender, senderCredentials } from "./numbers";
 import { emitEvent } from "./eventHooks";
 import { runScriptsFor } from "./scripts";
-import { Throttle, pool } from "../lib/throttle";
+import { Throttle, orgThrottle, pool } from "../lib/throttle";
 import { recountCampaign } from "./deliveryStatus";
 import type { Campaign, Contact, Tenant } from "@prisma/client";
 
@@ -22,6 +22,12 @@ import type { Campaign, Contact, Tenant } from "@prisma/client";
 
 const PAGE_SIZE = 500;
 const CONCURRENCY = 16;
+/**
+ * Results are written in chunks rather than once per page, so progress moves
+ * on a slow send too: at 10 a second a 500-page would otherwise show nothing
+ * for the best part of a minute. It also shrinks the window a crash can lose.
+ */
+const FLUSH_EVERY = 50;
 
 /** Contacts that should receive a campaign: opted in, and in its segment. */
 async function audienceWhere(tenantId: string, segmentId: string | null): Promise<any> {
@@ -89,7 +95,11 @@ export async function runCampaign(tenant: Tenant, campaignId: string): Promise<v
     },
   });
 
-  const throttle = new Throttle(Math.max(1, campaign.rateLimit || 20));
+  // Two gates: this campaign's own pace, and the workspace ceiling that every
+  // other campaign, journey and script is also drawing from.
+  const campaignRate = Math.max(1, campaign.rateLimit || 20);
+  const throttle = new Throttle(campaignRate);
+  const org = orgThrottle(tenant.id, tenant.sendRateLimit);
   let cursor = campaign.cursor || null;
   let stopped: "PAUSED" | "CANCELLED" | null = null;
 
@@ -115,30 +125,18 @@ export async function runCampaign(tenant: Tenant, campaignId: string): Promise<v
     );
     const todo = page.filter((c) => !already.has(c.id));
 
-    const outcomes: SendOutcome[] = [];
-    await pool(todo, CONCURRENCY, async (contact) => {
-      await throttle.take();
-      const text = fillTokens(campaign.template!.body, contact);
-      const result = await sendWhatsAppText(creds, contact.phone, text);
-
-      let status = result.ok ? "SENT" : "FAILED";
-      if (result.ok && !live) {
-        const roll = Math.random();
-        if (roll < 0.85) status = roll < 0.55 ? "READ" : "DELIVERED";
-      }
-      outcomes.push({
-        contactId: contact.id,
-        phone: contact.phone,
-        name: contact.name,
-        status,
-        waMessageId: result.waMessageId || null,
-        error: result.ok ? null : result.error || null,
+    let pending: SendOutcome[] = [];
+    const flush = async () => {
+      if (!pending.length) return;
+      const batch = pending;
+      pending = [];
+      // Used by segments like "hasn't been in a campaign for 90 days".
+      await prisma.contact.updateMany({
+        where: { id: { in: batch.map((o) => o.contactId) } },
+        data: { lastCampaignAt: new Date() },
       });
-    });
-
-    if (outcomes.length) {
       await prisma.campaignRecipient.createMany({
-        data: outcomes.map((o) => ({
+        data: batch.map((o) => ({
           campaignId: campaign.id,
           contactId: o.contactId,
           phone: o.phone,
@@ -150,19 +148,41 @@ export async function runCampaign(tenant: Tenant, campaignId: string): Promise<v
         })),
         skipDuplicates: true,
       });
-    }
+      await recountCampaign(campaign.id);
+      const snapshot = await prisma.campaign.findUnique({ where: { id: campaign.id } });
+      if (snapshot) {
+        emitRealtime({ tenantId: tenant.id, type: "campaign", campaign: snapshot } as any);
+      }
+    };
+
+    await pool(todo, CONCURRENCY, async (contact) => {
+      // Two gates: the workspace ceiling everything shares, then this
+      // campaign's own pace.
+      await org.take();
+      await throttle.take();
+      const text = fillTokens(campaign.template!.body, contact);
+      const result = await sendWhatsAppText(creds, contact.phone, text);
+
+      let status = result.ok ? "SENT" : "FAILED";
+      if (result.ok && !live) {
+        const roll = Math.random();
+        if (roll < 0.85) status = roll < 0.55 ? "READ" : "DELIVERED";
+      }
+      pending.push({
+        contactId: contact.id,
+        phone: contact.phone,
+        name: contact.name,
+        status,
+        waMessageId: result.waMessageId || null,
+        error: result.ok ? null : result.error || null,
+      });
+      if (pending.length >= FLUSH_EVERY) await flush();
+    });
+    await flush();
 
     cursor = page[page.length - 1].id;
-
-    // Written every page: this is the resume point if the process dies, and
-    // what the progress bar reads. Counting per page rather than per message
-    // keeps it one indexed groupBy per 500 sends.
+    // The resume point, written once the page is fully accounted for.
     await prisma.campaign.update({ where: { id: campaign.id }, data: { cursor } });
-    await recountCampaign(campaign.id);
-    const snapshot = await prisma.campaign.findUnique({ where: { id: campaign.id } });
-    if (snapshot) {
-      emitRealtime({ tenantId: tenant.id, type: "campaign", campaign: snapshot } as any);
-    }
   }
 
   await recountCampaign(campaign.id);

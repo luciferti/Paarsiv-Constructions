@@ -54,6 +54,17 @@ export async function handleStatuses(tenantId: string, statuses: StatusEvent[]) 
         data: { status: next, ...(error ? { error } : {}) },
       });
       await recountCampaign(recipient.campaignId);
+      // Roll the contact's own engagement forward so segments can filter on
+      // it without counting rows every time they're evaluated.
+      if (recipient.contactId && (next === "DELIVERED" || next === "READ")) {
+        await prisma.contact.update({
+          where: { id: recipient.contactId },
+          data: {
+            ...(next === "DELIVERED" ? { deliveredCount: { increment: 1 }, lastDeliveredAt: new Date() } : {}),
+            ...(next === "READ" ? { readCount: { increment: 1 } } : {}),
+          },
+        }).catch(() => {});
+      }
     }
   }
 }

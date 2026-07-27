@@ -2,29 +2,96 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Filter, Loader2, Plus, Trash2, Users } from "lucide-react";
+import { ArrowLeft, Filter, Loader2, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import clsx from "clsx";
 import { api } from "@/lib/api";
 import type { ContactField, Folder, SegCondition, SegOp, Segment } from "@/lib/types";
 
-const BASE_FIELDS: { v: string; label: string }[] = [
-  { v: "city", label: "City" },
-  { v: "tag", label: "Tag" },
-  { v: "name", label: "Name" },
-  { v: "phone", label: "Phone" },
-  { v: "email", label: "Email" },
-  { v: "optedIn", label: "Opted in" },
+interface Assessment {
+  verdict: "good" | "mixed" | "poor";
+  headline: string;
+  reasons: string[];
+  suggestions: string[];
+  engine: string;
+  stats: {
+    size: number; optedIn: number; optedOut: number; everDelivered: number;
+    everReplied: number; addedLast30: number; staleOver90: number;
+    readRate: number; replyRate: number;
+  };
+}
+
+/** Grouped so behaviour and timing are as easy to find as the plain fields. */
+const FIELD_GROUPS: { group: string; fields: { v: string; label: string }[] }[] = [
+  {
+    group: "Who they are",
+    fields: [
+      { v: "city", label: "City" },
+      { v: "country", label: "Country" },
+      { v: "company", label: "Company" },
+      { v: "name", label: "Name" },
+      { v: "phone", label: "Phone" },
+      { v: "email", label: "Email" },
+      { v: "tag", label: "Tag" },
+      { v: "optedIn", label: "Marketing consent" },
+    ],
+  },
+  {
+    group: "What they've done",
+    fields: [
+      { v: "delivered", label: "Messages delivered to them" },
+      { v: "read", label: "Messages they read" },
+      { v: "replied", label: "Times they replied" },
+      { v: "campaign", label: "Was in a campaign" },
+      { v: "anyCampaignDelivered", label: "Reached by any campaign" },
+    ],
+  },
+  {
+    group: "When",
+    fields: [
+      { v: "added", label: "Added to contacts" },
+      { v: "lastDelivered", label: "Last message delivered" },
+      { v: "lastReplied", label: "Last time they replied" },
+      { v: "lastCampaign", label: "Last campaign they got" },
+    ],
+  },
 ];
+
+const COUNT_FIELDS = ["delivered", "read", "replied"];
+const DATE_FIELDS = ["added", "lastDelivered", "lastReplied", "lastCampaign"];
 
 function opsFor(field: string): { v: SegOp; label: string }[] {
   if (field === "tag") return [{ v: "has", label: "has" }];
   if (field === "optedIn") return [{ v: "equals", label: "is" }];
+  if (field === "anyCampaignDelivered") return [{ v: "equals", label: "is true" }];
+  if (field === "campaign") return [
+    { v: "in_campaign", label: "was in" },
+    { v: "not_in_campaign", label: "was not in" },
+  ];
+  if (COUNT_FIELDS.includes(field)) return [
+    { v: "at_least", label: "at least" },
+    { v: "at_most", label: "at most" },
+  ];
+  if (DATE_FIELDS.includes(field)) return [
+    { v: "within_days", label: "in the last" },
+    { v: "not_within_days", label: "not in the last" },
+  ];
   return [
     { v: "contains", label: "contains" },
     { v: "equals", label: "equals" },
     { v: "not_equals", label: "not equals" },
     { v: "is_set", label: "is set" },
   ];
+}
+
+/** The default a field should start with when it's picked. */
+function defaultFor(field: string): { op: SegOp; value: string | boolean | number } {
+  if (field === "optedIn") return { op: "equals", value: "true" };
+  if (field === "anyCampaignDelivered") return { op: "equals", value: true };
+  if (field === "campaign") return { op: "in_campaign", value: "" };
+  if (COUNT_FIELDS.includes(field)) return { op: "at_least", value: 1 };
+  if (DATE_FIELDS.includes(field)) return { op: "within_days", value: 30 };
+  if (field === "tag") return { op: "has", value: "" };
+  return { op: "equals", value: "" };
 }
 
 const input = "w-full h-10 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-ring";
@@ -44,6 +111,12 @@ export default function SegmentEditor({ segmentId }: { segmentId?: string }) {
   const [folderId, setFolderId] = useState("");
   const [match, setMatch] = useState<"all" | "any">("all");
   const [conds, setConds] = useState<SegCondition[]>([{ field: "city", op: "equals", value: "" }]);
+  const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+  const [describeText, setDescribeText] = useState("");
+  const [describing, setDescribing] = useState(false);
+  const [describeNote, setDescribeNote] = useState<string | null>(null);
+  const [assessment, setAssessment] = useState<Assessment | null>(null);
+  const [assessing, setAssessing] = useState(false);
   const [count, setCount] = useState<number | null>(null);
   const [sample, setSample] = useState<{ id: string; name?: string | null; phone: string }[]>([]);
   const [previewing, setPreviewing] = useState(false);
@@ -51,6 +124,8 @@ export default function SegmentEditor({ segmentId }: { segmentId?: string }) {
   useEffect(() => {
     api.get<{ folders: Folder[] }>("/segment-folders").then((r) => setFolders(r.folders)).catch(() => {});
     api.get<{ fields: ContactField[] }>("/contact-fields").then((r) => setFields(r.fields)).catch(() => {});
+    api.get<{ campaigns: { id: string; name: string }[] }>("/segments/options")
+      .then((r) => setCampaigns(r.campaigns)).catch(() => {});
     if (!segmentId) return;
     api.get<{ segments: Segment[] }>("/segments")
       .then((r) => {
@@ -65,14 +140,63 @@ export default function SegmentEditor({ segmentId }: { segmentId?: string }) {
       .finally(() => setLoading(false));
   }, [segmentId]);
 
-  const fieldOptions = [...BASE_FIELDS, ...fields.map((f) => ({ v: `attr:${f.key}`, label: f.label }))];
+  const groups = [
+    ...FIELD_GROUPS,
+    ...(fields.length
+      ? [{ group: "Your custom fields", fields: fields.map((f) => ({ v: `attr:${f.key}`, label: f.label })) }]
+      : []),
+  ];
   const cleanRules = useCallback(
-    () => ({ match, conditions: conds.filter((c) => c.op === "is_set" || c.value !== "") }),
+    () => ({
+      match,
+      conditions: conds.filter(
+        (c) => c.op === "is_set" || c.field === "anyCampaignDelivered" || (c.value !== "" && c.value !== undefined)
+      ),
+    }),
     [match, conds]
   );
 
   function updateCond(i: number, patch: Partial<SegCondition>) {
     setConds((prev) => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
+  }
+
+  /** Describe the audience in words; the builder fills itself in. */
+  async function describe() {
+    if (!describeText.trim()) return;
+    setDescribing(true); setDescribeNote(null); setErr(null);
+    try {
+      const r = await api.post<{
+        rules: { match: "all" | "any"; conditions: SegCondition[] };
+        name: string; explanation: string; engine: string; count: number;
+      }>("/segments/describe", { text: describeText.trim() });
+
+      if (!r.rules.conditions.length) {
+        setDescribeNote(r.explanation || "Couldn't turn that into rules — try naming a field, a city or a number of days.");
+        return;
+      }
+      setMatch(r.rules.match);
+      setConds(r.rules.conditions);
+      if (!name.trim()) setName(r.name);
+      setCount(r.count);
+      setDescribeNote(
+        `${r.explanation}${r.engine === "rules" ? " (read from keywords — connect an AI key in Settings for a fuller reading)" : ""}`
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not read that description.");
+    } finally { setDescribing(false); }
+  }
+
+  /** Is this audience worth sending to? Figures come from the database. */
+  async function assess() {
+    setAssessing(true); setErr(null);
+    try {
+      const r = await api.post<{ assessment: Assessment }>("/segments/assess", {
+        rules: cleanRules(), name: name.trim() || undefined,
+      });
+      setAssessment(r.assessment);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not assess this segment.");
+    } finally { setAssessing(false); }
   }
 
   async function preview() {
@@ -147,6 +271,30 @@ export default function SegmentEditor({ segmentId }: { segmentId?: string }) {
               </div>
             </section>
 
+            <section className="rounded-xl border bg-accent/30 p-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary" />
+                <h2 className="text-sm font-semibold">Describe it instead</h2>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Say who you want in plain words and the rules below fill themselves in — then check them.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <input
+                  className={clsx(input, "flex-1")}
+                  placeholder="Bengaluru ke log jo last month add hue aur 2 baar se zyada delivery hui"
+                  value={describeText}
+                  onChange={(e) => setDescribeText(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && describe()}
+                />
+                <button className={btnPri} onClick={describe} disabled={describing || !describeText.trim()}>
+                  {describing ? <Loader2 className="w-3.5 h-3.5 inline mr-1.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 inline mr-1.5" />}
+                  Build it
+                </button>
+              </div>
+              {describeNote && <p className="text-[11px] text-muted-foreground mt-2">{describeNote}</p>}
+            </section>
+
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold">Rules</h2>
@@ -165,24 +313,53 @@ export default function SegmentEditor({ segmentId }: { segmentId?: string }) {
                     value={c.field}
                     onChange={(e) => {
                       const field = e.target.value;
-                      updateCond(i, { field, op: opsFor(field)[0].v, value: field === "optedIn" ? "true" : "" });
+                      updateCond(i, { field, ...defaultFor(field) });
                     }}>
-                    {fieldOptions.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
+                    {groups.map((g) => (
+                      <optgroup key={g.group} label={g.group}>
+                        {g.fields.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                   <select className="h-9 px-2 rounded-lg border bg-background text-sm"
                     value={c.op} onChange={(e) => updateCond(i, { op: e.target.value as SegOp })}>
                     {opsFor(c.field).map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
                   </select>
-                  {c.op !== "is_set" && (c.field === "optedIn" ? (
+
+                  {/* the value editor depends on what kind of field it is */}
+                  {c.field === "anyCampaignDelivered" ? null
+                  : c.op === "is_set" ? null
+                  : c.field === "optedIn" ? (
                     <select className="h-9 px-2 rounded-lg border bg-background text-sm"
                       value={String(c.value)} onChange={(e) => updateCond(i, { value: e.target.value })}>
-                      <option value="true">yes</option><option value="false">no</option>
+                      <option value="true">opted in</option>
+                      <option value="false">opted out</option>
                     </select>
+                  ) : c.field === "campaign" ? (
+                    <select className="h-9 px-2 rounded-lg border bg-background text-sm flex-1 min-w-40"
+                      value={String(c.value ?? "")} onChange={(e) => updateCond(i, { value: e.target.value })}>
+                      <option value="">Pick a campaign</option>
+                      {campaigns.map((cp) => <option key={cp.id} value={cp.id}>{cp.name}</option>)}
+                    </select>
+                  ) : COUNT_FIELDS.includes(c.field) ? (
+                    <div className="flex items-center gap-1.5">
+                      <input type="number" min={0} className="h-9 px-3 w-20 rounded-lg border bg-background text-sm"
+                        value={Number(c.value ?? 0)}
+                        onChange={(e) => updateCond(i, { value: Number(e.target.value) })} />
+                      <span className="text-xs text-muted-foreground">times</span>
+                    </div>
+                  ) : DATE_FIELDS.includes(c.field) ? (
+                    <div className="flex items-center gap-1.5">
+                      <input type="number" min={1} className="h-9 px-3 w-20 rounded-lg border bg-background text-sm"
+                        value={Number(c.value ?? 30)}
+                        onChange={(e) => updateCond(i, { value: Number(e.target.value) })} />
+                      <span className="text-xs text-muted-foreground">days</span>
+                    </div>
                   ) : (
                     <input className="h-9 px-3 rounded-lg border bg-background text-sm flex-1 min-w-32"
                       value={typeof c.value === "string" ? c.value : ""} placeholder="value"
                       onChange={(e) => updateCond(i, { value: e.target.value })} />
-                  ))}
+                  )}
                   {conds.length > 1 && (
                     <button className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-destructive"
                       onClick={() => setConds((p) => p.filter((_, idx) => idx !== i))}>
@@ -228,6 +405,75 @@ export default function SegmentEditor({ segmentId }: { segmentId?: string }) {
                 )}
               </>
             )}
+            <div className="mt-4 pt-4 border-t">
+              <button className={clsx(btnGhost, "w-full")} onClick={assess} disabled={assessing}>
+                {assessing ? <Loader2 className="w-3.5 h-3.5 inline mr-1.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 inline mr-1.5" />}
+                Is this worth sending to?
+              </button>
+
+              {assessment && (
+                <div className="mt-3 space-y-3">
+                  <div className={clsx(
+                    "rounded-xl border p-3",
+                    assessment.verdict === "good" ? "border-success/40 bg-success/10"
+                    : assessment.verdict === "mixed" ? "border-warning/40 bg-warning/10"
+                    : "border-destructive/40 bg-destructive/10"
+                  )}>
+                    <div className={clsx(
+                      "text-[11px] font-semibold uppercase tracking-wide",
+                      assessment.verdict === "good" ? "text-success"
+                      : assessment.verdict === "mixed" ? "text-warning" : "text-destructive"
+                    )}>
+                      {assessment.verdict === "good" ? "Worth sending" : assessment.verdict === "mixed" ? "Mixed" : "Low return expected"}
+                    </div>
+                    <p className="text-xs mt-1 leading-relaxed">{assessment.headline}</p>
+                  </div>
+
+                  {assessment.reasons.length > 0 && (
+                    <ul className="space-y-1.5">
+                      {assessment.reasons.map((r) => (
+                        <li key={r} className="text-[11px] text-muted-foreground leading-relaxed flex gap-1.5">
+                          <span className="text-muted-foreground/60">·</span>{r}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {assessment.suggestions.length > 0 && (
+                    <div className="rounded-lg border bg-card p-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        What would help
+                      </div>
+                      <ul className="mt-1.5 space-y-1.5">
+                        {assessment.suggestions.map((x) => (
+                          <li key={x} className="text-[11px] leading-relaxed flex gap-1.5">
+                            <span className="text-primary">→</span>{x}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      ["Will receive", assessment.stats.optedIn],
+                      ["Opted out", assessment.stats.optedOut],
+                      ["Reached before", assessment.stats.everDelivered],
+                      ["Have replied", assessment.stats.everReplied],
+                    ].map(([l, v]) => (
+                      <div key={String(l)} className="rounded-lg border bg-card px-2.5 py-1.5">
+                        <div className="text-sm font-semibold">{Number(v).toLocaleString()}</div>
+                        <div className="text-[10px] text-muted-foreground">{l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Figures are counted from your data. {assessment.engine === "rules" ? "Wording is rule-based — connect an AI key for a sharper read." : "Wording by AI."}
+                  </p>
+                </div>
+              )}
+            </div>
+
             <p className="text-[11px] text-muted-foreground mt-4 leading-relaxed">
               Segments are live — as contacts change, who is inside updates automatically.
             </p>

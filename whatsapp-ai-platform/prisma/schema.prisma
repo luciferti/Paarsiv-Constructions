@@ -103,6 +103,9 @@ model Tenant {
   mergeRules     Json?
   // Opt-out compliance: { enabled, optOutKeywords[], optInKeywords[], optOutReply, optInReply }
   consentRules   Json?
+  // Messages per second across the whole workspace, shared by every campaign,
+  // journey and script. Meta's Cloud API takes ~80/s by default.
+  sendRateLimit  Int      @default(60)
   createdAt      DateTime @default(now())
 
   users          User[]
@@ -531,6 +534,14 @@ model Contact {
   tags       String[] @default([])
   attributes Json?    // free-form custom fields
   optedIn    Boolean  @default(true) // WhatsApp marketing opt-in
+  // Rolling engagement, kept up to date by the delivery-status webhook so
+  // segments can filter on it without counting rows every time.
+  deliveredCount Int      @default(0)
+  readCount      Int      @default(0)
+  repliedCount   Int      @default(0)
+  lastCampaignAt DateTime?
+  lastDeliveredAt DateTime?
+  lastInboundAt   DateTime?
   // Consent trail — who changed it and when, so an opt-out is defensible.
   optedOutAt   DateTime?
   optedInAt    DateTime?
@@ -539,9 +550,13 @@ model Contact {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  campaignRecipients CampaignRecipient[]
+
   @@unique([tenantId, phone])
   @@index([tenantId, city])
   @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deliveredCount])
 }
 
 // ---------------- ContactField (tenant-defined custom field) ----------------
@@ -717,6 +732,7 @@ model CampaignRecipient {
   campaignId String
   campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   contactId  String?
+  contact    Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
   phone      String
   name       String?
   status     String   @default("QUEUED") // QUEUED | SENT | DELIVERED | READ | FAILED

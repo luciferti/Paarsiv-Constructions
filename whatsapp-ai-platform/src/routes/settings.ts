@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { requireAuth, requirePermission } from "../middleware/auth";
 import { audit } from "../lib/audit";
 import { consentRulesOf } from "../services/consent";
+import { resetOrgThrottle } from "../lib/throttle";
 
 export const settingsRouter = Router();
 settingsRouter.use(requireAuth);
@@ -30,6 +31,7 @@ function maskTenant(t: any) {
     openaiKey: mask(t.openaiKey),
     mergeRules: t.mergeRules ?? null,
     consentRules: consentRulesOf(t),
+    sendRateLimit: t.sendRateLimit,
   };
 }
 
@@ -70,6 +72,8 @@ const updateSchema = z.object({
       survivor: z.enum(["mostActive", "oldest"]),
     })
     .optional(),
+  // Meta's Cloud API accepts ~80/s by default; 1000 is the ceiling they grant.
+  sendRateLimit: z.number().int().min(1).max(1000).optional(),
   consentRules: z
     .object({
       enabled: z.boolean(),
@@ -111,6 +115,11 @@ settingsRouter.patch("/", requirePermission("settings.manage"), async (req, res)
   if (d.systemPrompt !== undefined) data.systemPrompt = d.systemPrompt;
   if (d.mergeRules !== undefined) data.mergeRules = d.mergeRules;
   if (d.consentRules !== undefined) data.consentRules = d.consentRules;
+  if (d.sendRateLimit !== undefined) {
+    data.sendRateLimit = d.sendRateLimit;
+    // Drop the cached bucket so the new pace applies to the next message.
+    resetOrgThrottle(req.auth!.tenantId);
+  }
 
   const secrets = ["claudeKey", "openaiKey", "whatsappToken", "verifyToken", "phoneNumberId", "wabaId"] as const;
   for (const k of secrets) if (d[k] && d[k]!.trim()) data[k] = d[k]!.trim();

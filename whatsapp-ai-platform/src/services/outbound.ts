@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { emitRealtime } from "../lib/events";
 import { sendWhatsAppText } from "./whatsapp";
 import { resolveSender, senderCredentials } from "./numbers";
+import { orgThrottle } from "../lib/throttle";
 import type { Tenant } from "@prisma/client";
 
 const PREVIEW_LEN = 120;
@@ -29,6 +30,8 @@ export async function sendOutbound(
     create: { tenantId: tenant.id, phoneNumberId: on, phone },
   });
 
+  // Journeys and scripts share the workspace's rate with campaigns.
+  await orgThrottle(tenant.id, tenant.sendRateLimit).take();
   const result = await sendWhatsAppText(senderCredentials(tenant, sender), phone, text);
 
   const message = await prisma.message.create({

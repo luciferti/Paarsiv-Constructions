@@ -152,11 +152,14 @@ export interface Asset {
   createdAt: string;
 }
 
-export type SegOp = "equals" | "contains" | "not_equals" | "is_set" | "has";
+export type SegOp =
+  | "equals" | "contains" | "not_equals" | "is_set" | "has"
+  | "at_least" | "at_most" | "within_days" | "not_within_days"
+  | "in_campaign" | "not_in_campaign";
 export interface SegCondition {
   field: string;
   op: SegOp;
-  value?: string | boolean;
+  value?: string | boolean | number;
 }
 export interface SegRules {
   match: "all" | "any";

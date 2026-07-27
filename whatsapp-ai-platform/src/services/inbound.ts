@@ -95,6 +95,11 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
   // Every inbound customer becomes a Contact (marketing audience) — but if
   // their very first words are "STOP", a welcome journey must not fire.
   const isNewContact = await upsertContact(tenant.id, msg.phone, msg.customerName);
+  // "Has replied" and "last heard from" drive segment rules, so record them.
+  await prisma.contact.updateMany({
+    where: { tenantId: tenant.id, OR: [{ phone: msg.phone }, { altPhones: { has: msg.phone } }] },
+    data: { repliedCount: { increment: 1 }, lastInboundAt: new Date() },
+  }).catch(() => {});
   if (isNewContact) {
     const created = { phone: msg.phone, name: msg.customerName ?? null, source: "inbound" };
     emitEvent(tenant.id, "contact.created", created);

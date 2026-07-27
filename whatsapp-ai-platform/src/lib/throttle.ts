@@ -57,3 +57,30 @@ export async function pool<T>(
   });
   await Promise.all(runners);
 }
+
+/**
+ * One bucket per workspace, shared by every campaign, journey and script.
+ *
+ * A per-campaign limit isn't enough on its own: two campaigns at 40/s each
+ * would put 80/s through the same WhatsApp number and start collecting
+ * rate-limit rejections. Everything that sends takes from here first.
+ */
+const orgBuckets = new Map<string, { throttle: Throttle; rate: number }>();
+
+export function orgThrottle(tenantId: string, ratePerSecond: number): Throttle {
+  const rate = Math.max(1, ratePerSecond);
+  const existing = orgBuckets.get(tenantId);
+  // Rebuild when the workspace changes its limit, so a save takes effect
+  // on the next message rather than the next restart.
+  if (!existing || existing.rate !== rate) {
+    const throttle = new Throttle(rate);
+    orgBuckets.set(tenantId, { throttle, rate });
+    return throttle;
+  }
+  return existing.throttle;
+}
+
+/** Forget a workspace's bucket — used when its rate is reconfigured. */
+export function resetOrgThrottle(tenantId: string): void {
+  orgBuckets.delete(tenantId);
+}

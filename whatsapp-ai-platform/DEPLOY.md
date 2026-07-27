@@ -263,6 +263,19 @@ The campaign screen says this before you press send, rather than after.
 Journeys enrol segments the same way, in pages — the old 5,000-contact cap is
 gone.
 
+### Two throttles, not one
+
+**Settings → Sending speed** sets one ceiling for the whole workspace. Every
+campaign, journey and script draws from the same bucket, because a per-campaign
+limit alone doesn't help: two campaigns at 40/s each would put 80/s through the
+same number and start collecting rate-limit rejections. A campaign's own rate
+can be slower than the workspace ceiling, never faster.
+
+Measured: with the ceiling at 10/s and two campaigns each *asking* for 100/s,
+combined output was 10.0/s. At a 40/s ceiling, 37.4/s.
+
+A change applies to the next message, not after a restart.
+
 ### What is still single-process
 
 Sending runs inside the API process. That is fine to the limits above, since
