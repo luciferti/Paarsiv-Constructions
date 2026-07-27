@@ -5,6 +5,7 @@ import { sendWhatsAppText } from "./whatsapp";
 import { emitRealtime } from "../lib/events";
 import { resolveSender, senderCredentials } from "./numbers";
 import { emitEvent } from "./eventHooks";
+import { runScriptsFor } from "./scripts";
 import type { Tenant } from "@prisma/client";
 
 /** Resolve a campaign's audience: opted-in contacts in its segment (or all). */
@@ -115,12 +116,14 @@ export async function runCampaign(tenant: Tenant, campaignId: string) {
 
   emitRealtime({ tenantId: tenant.id, type: "conversation", conversation: { campaign: finished } as any });
 
-  emitEvent(tenant.id, "campaign.finished", {
+  const done = {
     campaignId: finished.id,
     name: finished.name,
     status: finished.status,
     audience: audience.length,
     sent, delivered, read, failed,
     phoneNumberId: sender?.phoneNumberId ?? "",
-  });
+  };
+  emitEvent(tenant.id, "campaign.finished", done);
+  runScriptsFor(tenant.id, "campaign.finished", done);
 }

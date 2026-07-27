@@ -19,6 +19,7 @@ import { settingsRouter } from "./routes/settings";
 import { whatsappRouter } from "./routes/whatsapp";
 import { connectorsRouter, eventHooksRouter, hooksRouter } from "./routes/connectors";
 import { externalApisRouter } from "./routes/externalApis";
+import { scriptHooksRouter, scriptsRouter } from "./routes/scripts";
 import { usersRouter } from "./routes/users";
 import { apiKeysRouter } from "./routes/apiKeys";
 import { aiAssistRouter } from "./routes/aiAssist";
@@ -90,6 +91,8 @@ app.use("/api/hooks", hooksRouter); // public inbound connector webhooks (secret
 app.use("/api/connectors", connectorsRouter); // connector management (settings)
 app.use("/api/event-hooks", eventHooksRouter); // outbound: we POST events to the customer
 app.use("/api/external-apis", externalApisRouter); // developer console: call any third-party API
+app.use("/api/run", scriptHooksRouter); // public: a URL that runs a customer script
+app.use("/api/scripts", scriptsRouter); // customer-written code + its run history
 app.use("/api/users", usersRouter); // agents roster / presence / create
 app.use("/api/contacts", contactsRouter); // audience: list, create, import, delete
 app.use("/api/contact-fields", contactFieldsRouter); // custom field definitions

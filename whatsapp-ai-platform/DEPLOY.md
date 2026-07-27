@@ -180,6 +180,25 @@ Secrets are stored server-side and never returned to the browser. Requests to
 private and loopback addresses are refused, so a saved call can't be pointed at
 the infrastructure the platform runs on.
 
+### Scripts (your own code)
+
+The console covers "call this URL". Scripts cover everything around it: read
+from two places, decide what it means, message the customer, save the answer.
+
+**Settings → Integrations → Scripts.** Plain JavaScript with a small SDK —
+`input`, `log()`, `http.get/post`, `whatsapp.send`, `contacts.find/update/tag` —
+and `return` whatever you want recorded. A script runs when a customer messages,
+when a contact appears, when a campaign finishes, on a URL you POST to, or when
+you press Run. The editor runs what is on screen, not what was last saved, and
+shows the output, the return value and the run history.
+
+Limits: ten seconds per run, twenty HTTP calls, no `require`, and private or
+loopback addresses are refused. To be clear about what that is and isn't — the
+sandbox stops an accidental infinite loop or a runaway fetch from hurting the
+server. It is **not** a boundary against the person writing the script, who
+already holds workspace-admin rights. Keep `settings.manage` to people you'd
+trust with a shell.
+
 ### API (everything out and in)
 
 **Settings → Integrations → API** has the base URL, the auth header, key

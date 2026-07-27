@@ -7,6 +7,7 @@ import { applyConsent, classify } from "./consent";
 import { auditRaw } from "../lib/audit";
 import { defaultNumber, resolveSender, senderCredentials } from "./numbers";
 import { emitEvent } from "./eventHooks";
+import { runScriptsFor } from "./scripts";
 import type { Tenant, Conversation } from "@prisma/client";
 
 const PREVIEW_LEN = 120;
@@ -95,9 +96,9 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
   // their very first words are "STOP", a welcome journey must not fire.
   const isNewContact = await upsertContact(tenant.id, msg.phone, msg.customerName);
   if (isNewContact) {
-    emitEvent(tenant.id, "contact.created", {
-      phone: msg.phone, name: msg.customerName ?? null, source: "inbound",
-    });
+    const created = { phone: msg.phone, name: msg.customerName ?? null, source: "inbound" };
+    emitEvent(tenant.id, "contact.created", created);
+    runScriptsFor(tenant.id, "contact.created", created);
     if (!consentAction) {
       triggerNewContactJourneys(tenant, msg.phone, msg.customerName, inboundOn).catch(() => {});
     }
@@ -133,14 +134,16 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
   });
   emitRealtime({ tenantId: tenant.id, type: "conversation", conversation: updatedConv });
 
-  emitEvent(tenant.id, "message.received", {
+  const received = {
     conversationId: conv.id,
     phone: msg.phone,
     name: msg.customerName ?? updatedConv.customerName ?? null,
     text: msg.text,
     phoneNumberId: inboundOn,
     receivedAt: inbound.timestamp,
-  });
+  };
+  emitEvent(tenant.id, "message.received", received);
+  runScriptsFor(tenant.id, "message.received", received);
 
   // Consent comes first: "STOP" must be honoured even in a human-owned thread,
   // and it must not fall through to an AI reply or a journey.

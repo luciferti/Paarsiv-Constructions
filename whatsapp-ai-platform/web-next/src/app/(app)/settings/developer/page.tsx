@@ -338,6 +338,12 @@ export default function DeveloperPage() {
                   lookup. Save a call here and a journey can run it mid-conversation, filling it in
                   with the contact it&apos;s talking to.
                 </p>
+                <p className="text-xs text-muted-foreground mt-3 max-w-md mx-auto leading-relaxed">
+                  Need logic between the calls — read two places, decide, then message someone?
+                  Write it in{" "}
+                  <button className="underline underline-offset-2 hover:text-foreground"
+                    onClick={() => router.push("/settings/scripts")}>Scripts</button>.
+                </p>
                 {activeApi && <button className={clsx(btnPri, "mt-5")} onClick={newRequest}>New request</button>}
               </div>
             )}

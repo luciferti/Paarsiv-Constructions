@@ -218,6 +218,10 @@ export default function SettingsPage() {
                 to: "/settings/developer", icon: Terminal, title: "Developer console",
                 desc: "Call any third-party API from here — try it live, then run it inside a journey.",
               },
+              {
+                to: "/settings/scripts", icon: Code2, title: "Scripts",
+                desc: "Write the glue yourself: fetch from anywhere, decide, then send a WhatsApp.",
+              },
             ].map((card) => {
               const Icon = card.icon;
               return (

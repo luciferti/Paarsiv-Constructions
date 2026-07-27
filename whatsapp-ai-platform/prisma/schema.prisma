@@ -125,6 +125,7 @@ model Tenant {
   connectors      Connector[]
   eventHooks      EventHook[]
   externalApis    ExternalApi[]
+  scripts         Script[]
   auditLogs       AuditLog[]
 }
 
@@ -292,6 +293,50 @@ model ExternalApiLog {
   createdAt  DateTime           @default(now())
 
   @@index([requestId, createdAt])
+}
+
+// ---------------- Script (customer-written code that runs here) -------------
+// For the glue nobody can anticipate: call someone's API, decide something,
+// send a WhatsApp, write it back on the contact. Runs server-side in a
+// sandbox with a small SDK and a hard timeout.
+model Script {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  code        String   @default("")
+  // manual | http | message.received | contact.created | campaign.finished
+  trigger     String   @default("manual")
+  // Path secret for the http trigger, so the URL itself is the credential.
+  secret      String   @unique
+  enabled     Boolean  @default(false)
+  runs        Int      @default(0)
+  failures    Int      @default(0)
+  lastRunAt   DateTime?
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  history ScriptRun[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, trigger])
+}
+
+model ScriptRun {
+  id         String   @id @default(cuid())
+  scriptId   String
+  script     Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  status     String   @default("ok") // ok | failed | timeout
+  durationMs Int?
+  trigger    String?  // what set it off
+  logs       String?  // whatever the script printed
+  result     String?  // whatever it returned
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([scriptId, createdAt])
 }
 
 // ---------------- AuditLog ----------------

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { prisma } from "../lib/prisma";
 import { triggerNewContactJourneys } from "./journeys";
 import { emitEvent } from "./eventHooks";
+import { runScriptsFor } from "./scripts";
 import type { Connector, Tenant } from "@prisma/client";
 
 /**
@@ -277,9 +278,9 @@ export async function processEvent(
   });
   // A contact arriving from a CRM enters welcome journeys like any other.
   triggerNewContactJourneys(tenant, phone, mapped.name).catch(() => {});
-  emitEvent(tenant.id, "contact.created", {
-    phone, name: mapped.name ?? null, source: connector.type,
-  });
+  const created = { phone, name: mapped.name ?? null, source: connector.type };
+  emitEvent(tenant.id, "contact.created", created);
+  runScriptsFor(tenant.id, "contact.created", created);
 
   return finish({
     status: "processed",

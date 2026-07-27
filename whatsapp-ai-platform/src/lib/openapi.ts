@@ -112,6 +112,19 @@ export const openapiSpec = {
     },
     "/connectors/{id}/rotate": { post: { summary: "New webhook secret; the old URL stops working", responses: { "200": { description: "connector" } } } },
     "/connectors/{id}/events": { get: { summary: "Last 50 events with what each one did", responses: { "200": { description: "events[]" } } } },
+    "/scripts": {
+      get: { summary: "Customer-written scripts and the triggers they can use", responses: { "200": { description: "scripts[] + triggers" } } },
+      post: { summary: "Create a script (starts disabled)", responses: { "201": { description: "script" } } },
+    },
+    "/scripts/{id}/run": { post: { summary: "Run it — send `code` to try a draft, `input` to shape what it sees", responses: { "200": { description: "status, logs, return value" } } } },
+    "/scripts/{id}/runs": { get: { summary: "Last 30 runs with their output", responses: { "200": { description: "runs[]" } } } },
+    "/run/{secret}": {
+      post: {
+        summary: "PUBLIC — runs the http-triggered script with that secret; the body arrives as input.body and the return value is the response",
+        security: [],
+        responses: { "200": { description: "the script's return value" } },
+      },
+    },
     "/external-apis": {
       get: { summary: "Registered third-party APIs and their saved requests (secrets withheld)", responses: { "200": { description: "apis[]" } } },
       post: { summary: "Register an API: base URL + how it authenticates", responses: { "201": { description: "api" } } },
