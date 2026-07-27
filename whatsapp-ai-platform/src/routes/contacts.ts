@@ -8,6 +8,7 @@ import { audit } from "../lib/audit";
 import { findDuplicates, mergeContacts, mergeRulesOf, pickSurvivor } from "../services/merge";
 import { parseRange, dateFilter } from "../lib/dateRange";
 import { pageMeta, parsePaging } from "../lib/pagination";
+import { emitEvent } from "../services/eventHooks";
 
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
@@ -238,6 +239,11 @@ contactsRouter.patch("/:id", requirePermission("contacts.edit"), async (req, res
     audit(req, parsed.data.optedIn ? "contact.opt_in" : "contact.opt_out", {
       entity: "contact", entityId: c.id, meta: { phone: c.phone, via: "agent" },
     });
+    emitEvent(
+      req.auth!.tenantId,
+      parsed.data.optedIn ? "contact.opted_in" : "contact.opted_out",
+      { phone: c.phone, via: "agent" }
+    );
   }
 
   const contact = await prisma.contact.update({ where: { id: c.id }, data });

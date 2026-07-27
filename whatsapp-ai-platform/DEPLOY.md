@@ -134,6 +134,30 @@ whole connector paused.
 For a deeper integration than "post JSON at a URL" — two-way sync, OAuth apps,
 a product not in the list — customers are pointed at the support team.
 
+### Event webhooks (data out)
+
+The other direction, on the same screen. Subscribe a URL of yours to any of:
+`message.received`, `message.sent`, `conversation.handoff`, `contact.created`,
+`contact.opted_out`, `contact.opted_in`, `campaign.finished` — or leave the list
+empty for all of them.
+
+Every request carries the event body plus three headers:
+
+```
+X-Event: message.received
+X-Timestamp: 1769500000000
+X-Signature: sha256=<hmac>
+```
+
+Verify it by recomputing `HMAC-SHA256(secret, "{timestamp}.{rawBody}")` and
+comparing. Delivery is fire-and-forget — nothing in the messaging path waits on
+your server — and each event is tried up to three times with a short backoff.
+Ten consecutive failures pause the endpoint rather than retrying a dead host
+forever; switching it back on clears the streak. The last fifty deliveries are
+listed with their status code, attempt count and error, and **Test** sends a
+real signed request down the same path so setup can be proven before anything
+depends on it.
+
 ### API (everything out and in)
 
 **Settings → Integrations → API** has the base URL, the auth header, key

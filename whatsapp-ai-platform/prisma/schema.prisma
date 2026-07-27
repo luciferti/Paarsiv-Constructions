@@ -123,6 +123,7 @@ model Tenant {
   journeys        Journey[]
   apiKeys         ApiKey[]
   connectors      Connector[]
+  eventHooks      EventHook[]
   auditLogs       AuditLog[]
 }
 
@@ -191,6 +192,46 @@ model ConnectorEvent {
   createdAt   DateTime  @default(now())
 
   @@index([connectorId, createdAt])
+}
+
+// ---------------- EventHook (outbound: we call the customer's system) -------
+// The mirror of Connector. When something happens here, subscribers get a
+// signed POST so a CRM can react to a reply, an opt-out or a finished send.
+model EventHook {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  url           String
+  secret        String   // HMAC-SHA256 signing key, shown in the UI
+  events        String[] @default([]) // empty = every event
+  active        Boolean  @default(true)
+  delivered     Int      @default(0)
+  failed        Int      @default(0)
+  // Consecutive failures; a dead endpoint gets paused instead of retried forever
+  failStreak    Int      @default(0)
+  lastDeliveryAt DateTime?
+  lastError     String?
+  createdAt     DateTime @default(now())
+
+  deliveries EventDelivery[]
+
+  @@index([tenantId])
+}
+
+model EventDelivery {
+  id         String    @id @default(cuid())
+  hookId     String
+  hook       EventHook @relation(fields: [hookId], references: [id], onDelete: Cascade)
+  event      String
+  status     String    @default("pending") // delivered | failed
+  statusCode Int?
+  attempts   Int       @default(1)
+  error      String?
+  payload    Json?
+  createdAt  DateTime  @default(now())
+
+  @@index([hookId, createdAt])
 }
 
 // ---------------- AuditLog ----------------

@@ -17,7 +17,7 @@ import { webhookRouter } from "./routes/webhook";
 import { conversationsRouter } from "./routes/conversations";
 import { settingsRouter } from "./routes/settings";
 import { whatsappRouter } from "./routes/whatsapp";
-import { connectorsRouter, hooksRouter } from "./routes/connectors";
+import { connectorsRouter, eventHooksRouter, hooksRouter } from "./routes/connectors";
 import { usersRouter } from "./routes/users";
 import { apiKeysRouter } from "./routes/apiKeys";
 import { aiAssistRouter } from "./routes/aiAssist";
@@ -87,6 +87,7 @@ app.use("/api/settings", settingsRouter); // AI Control Panel (engine, keys, kno
 app.use("/api/whatsapp", whatsappRouter); // Meta embedded signup: connect, verify, repair
 app.use("/api/hooks", hooksRouter); // public inbound connector webhooks (secret in path)
 app.use("/api/connectors", connectorsRouter); // connector management (settings)
+app.use("/api/event-hooks", eventHooksRouter); // outbound: we POST events to the customer
 app.use("/api/users", usersRouter); // agents roster / presence / create
 app.use("/api/contacts", contactsRouter); // audience: list, create, import, delete
 app.use("/api/contact-fields", contactFieldsRouter); // custom field definitions

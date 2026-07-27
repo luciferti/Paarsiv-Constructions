@@ -6,6 +6,7 @@ import { sendWhatsAppText } from "./whatsapp";
 import { applyConsent, classify } from "./consent";
 import { auditRaw } from "../lib/audit";
 import { defaultNumber, resolveSender, senderCredentials } from "./numbers";
+import { emitEvent } from "./eventHooks";
 import type { Tenant, Conversation } from "@prisma/client";
 
 const PREVIEW_LEN = 120;
@@ -93,8 +94,13 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
   // Every inbound customer becomes a Contact (marketing audience) — but if
   // their very first words are "STOP", a welcome journey must not fire.
   const isNewContact = await upsertContact(tenant.id, msg.phone, msg.customerName);
-  if (isNewContact && !consentAction) {
-    triggerNewContactJourneys(tenant, msg.phone, msg.customerName, inboundOn).catch(() => {});
+  if (isNewContact) {
+    emitEvent(tenant.id, "contact.created", {
+      phone: msg.phone, name: msg.customerName ?? null, source: "inbound",
+    });
+    if (!consentAction) {
+      triggerNewContactJourneys(tenant, msg.phone, msg.customerName, inboundOn).catch(() => {});
+    }
   }
 
   const inbound = await prisma.message.create({
@@ -127,6 +133,15 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
   });
   emitRealtime({ tenantId: tenant.id, type: "conversation", conversation: updatedConv });
 
+  emitEvent(tenant.id, "message.received", {
+    conversationId: conv.id,
+    phone: msg.phone,
+    name: msg.customerName ?? updatedConv.customerName ?? null,
+    text: msg.text,
+    phoneNumberId: inboundOn,
+    receivedAt: inbound.timestamp,
+  });
+
   // Consent comes first: "STOP" must be honoured even in a human-owned thread,
   // and it must not fall through to an AI reply or a journey.
   if (consentAction) {
@@ -135,6 +150,11 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
     auditRaw(tenant.id, consentAction === "opt_out" ? "contact.opt_out" : "contact.opt_in", {
       meta: { phone: msg.phone, via: "keyword", text: msg.text },
     });
+    emitEvent(
+      tenant.id,
+      consentAction === "opt_out" ? "contact.opted_out" : "contact.opted_in",
+      { phone: msg.phone, via: "keyword", text: msg.text }
+    );
     return;
   }
 
@@ -165,6 +185,9 @@ export async function handleInbound(tenant: Tenant, msg: InboundMessage) {
       tenantId: tenant.id,
       type: "conversation",
       conversation: handedOff,
+    });
+    emitEvent(tenant.id, "conversation.handoff", {
+      conversationId: conv.id, phone: msg.phone, reason: "ai_handoff",
     });
   }
 }
@@ -216,6 +239,15 @@ export async function sendReply(
     message: outbound,
   });
   emitRealtime({ tenantId: tenant.id, type: "conversation", conversation: updated });
+
+  emitEvent(tenant.id, "message.sent", {
+    conversationId: conv.id,
+    phone: conv.phone,
+    text,
+    sentBy,
+    phoneNumberId: conv.phoneNumberId,
+    ok: result.ok,
+  });
 
   return { message: outbound, sendResult: result };
 }

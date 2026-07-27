@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { prisma } from "../lib/prisma";
 import { triggerNewContactJourneys } from "./journeys";
+import { emitEvent } from "./eventHooks";
 import type { Connector, Tenant } from "@prisma/client";
 
 /**
@@ -9,7 +10,8 @@ import type { Connector, Tenant } from "@prisma/client";
  * webhook URL with a long secret in it, plus a mapper that turns that
  * product's payload into a contact.
  *
- * Data flows one way, in. Nothing here calls the external system.
+ * Records only flow in. Telling an external system that something happened
+ * here is the job of event hooks (services/eventHooks.ts).
  */
 
 export const CONNECTOR_TYPES = ["shopify", "salesforce", "zoho", "servicenow", "custom"] as const;
@@ -275,6 +277,9 @@ export async function processEvent(
   });
   // A contact arriving from a CRM enters welcome journeys like any other.
   triggerNewContactJourneys(tenant, phone, mapped.name).catch(() => {});
+  emitEvent(tenant.id, "contact.created", {
+    phone, name: mapped.name ?? null, source: connector.type,
+  });
 
   return finish({
     status: "processed",

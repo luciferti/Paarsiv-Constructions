@@ -112,6 +112,12 @@ export const openapiSpec = {
     },
     "/connectors/{id}/rotate": { post: { summary: "New webhook secret; the old URL stops working", responses: { "200": { description: "connector" } } } },
     "/connectors/{id}/events": { get: { summary: "Last 50 events with what each one did", responses: { "200": { description: "events[]" } } } },
+    "/event-hooks": {
+      get: { summary: "Outbound subscriptions + the event catalog", responses: { "200": { description: "hooks[] + catalog" } } },
+      post: { summary: "Send events to a URL of yours; omit `events` for all of them", responses: { "201": { description: "hook incl. its signing secret" } } },
+    },
+    "/event-hooks/{id}/test": { post: { summary: "Fire a real signed delivery so setup can be proven", responses: { "200": { description: "hook + delivery result" } } } },
+    "/event-hooks/{id}/deliveries": { get: { summary: "Last 50 deliveries with status, attempts and errors", responses: { "200": { description: "deliveries[]" } } } },
     "/hooks/{secret}": {
       post: {
         summary: "PUBLIC — where external systems post. The secret in the path is the credential; the payload is mapped to a contact by connector type",
