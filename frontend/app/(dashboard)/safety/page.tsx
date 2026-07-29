@@ -1,5 +1,6 @@
 "use client";
 
+import { Can } from "@/components/auth/Can";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -49,9 +50,11 @@ export default function SafetyPage() {
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Safety</h1>
-        <Link href="/safety/new" className="button-primary">
+        <Can perm="safety:create">
+          <Link href="/safety/new" className="button-primary">
           + Report Incident
         </Link>
+        </Can>
       </div>
 
       {error && <p className="form-error">{error}</p>}

@@ -1,5 +1,6 @@
 "use client";
 
+import { Can } from "@/components/auth/Can";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -25,9 +26,11 @@ export default function MaterialsListPage() {
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Materials</h1>
-        <Link href="/materials/new" className="button-primary">
+        <Can perm="material:create">
+          <Link href="/materials/new" className="button-primary">
           + New Material
         </Link>
+        </Can>
       </div>
 
       <div className="sites-filters">

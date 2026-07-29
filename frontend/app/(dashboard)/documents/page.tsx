@@ -1,5 +1,6 @@
 "use client";
 
+import { Can } from "@/components/auth/Can";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -51,9 +52,11 @@ export default function DocumentsPage() {
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Documents</h1>
-        <Link href="/documents/new" className="button-primary">
+        <Can perm="document:create">
+          <Link href="/documents/new" className="button-primary">
           + Add Document
         </Link>
+        </Can>
       </div>
 
       {error && <p className="form-error">{error}</p>}

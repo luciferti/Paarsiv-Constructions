@@ -1,5 +1,6 @@
 "use client";
 
+import { Can } from "@/components/auth/Can";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -20,9 +21,11 @@ export default function WorkOrdersPage() {
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Work Orders</h1>
-        <Link href="/work-orders/new" className="button-primary">
+        <Can perm="workorder:create">
+          <Link href="/work-orders/new" className="button-primary">
           + New WO
         </Link>
+        </Can>
       </div>
 
       <div className="sites-filters">

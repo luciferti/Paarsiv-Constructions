@@ -1,5 +1,6 @@
 "use client";
 
+import { Can } from "@/components/auth/Can";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -17,9 +18,11 @@ export default function PurchaseOrdersListPage() {
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Purchase Orders</h1>
-        <Link href="/purchase-orders/new" className="button-primary">
+        <Can perm="po:create">
+          <Link href="/purchase-orders/new" className="button-primary">
           + New PO
         </Link>
+        </Can>
       </div>
 
       <div className="sites-filters">

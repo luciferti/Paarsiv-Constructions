@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { Can } from "@/components/auth/Can";
 import { getDashboardSummary } from "@/lib/api/dashboard";
 import { seedDemoData } from "@/lib/api/demo";
 import { DashboardSummary } from "@/lib/types/dashboard";
@@ -68,7 +69,8 @@ export default function DashboardPage() {
       </div>
 
       {isEmptyOrg && (
-        <div className="seed-card">
+        <Can perm="demo:seed">
+          <div className="seed-card">
           <div>
             <h2 className="seed-card-title">Welcome! Your workspace is empty.</h2>
             <p className="seed-card-text">
@@ -81,7 +83,8 @@ export default function DashboardPage() {
           <button type="button" className="button-primary" onClick={handleSeed} disabled={seeding}>
             {seeding ? "Loading sample data…" : "Load sample data"}
           </button>
-        </div>
+          </div>
+        </Can>
       )}
 
       <div className="stat-tile-grid">

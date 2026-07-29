@@ -1,5 +1,6 @@
 "use client";
 
+import { Can } from "@/components/auth/Can";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -24,9 +25,11 @@ export default function EquipmentPage() {
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Equipment</h1>
-        <Link href="/equipment/new" className="button-primary">
+        <Can perm="equipment:create">
+          <Link href="/equipment/new" className="button-primary">
           + New Equipment
         </Link>
+        </Can>
       </div>
 
       {error && <p className="form-error">{error}</p>}

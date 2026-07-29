@@ -1,5 +1,6 @@
 "use client";
 
+import { Can } from "@/components/auth/Can";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -26,9 +27,11 @@ export default function InvoicesListPage() {
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Invoices</h1>
-        <Link href="/invoices/upload" className="button-primary">
+        <Can perm="invoice:upload">
+          <Link href="/invoices/upload" className="button-primary">
           + Upload Invoice
         </Link>
+        </Can>
       </div>
 
       <div className="sites-filters">

@@ -1,5 +1,6 @@
 "use client";
 
+import { Can } from "@/components/auth/Can";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -20,9 +21,11 @@ export default function ClientBillsListPage() {
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Client Bills</h1>
-        <Link href="/client-bills/new" className="button-primary">
+        <Can perm="bill:create">
+          <Link href="/client-bills/new" className="button-primary">
           + New Bill
         </Link>
+        </Can>
       </div>
 
       {summary && (

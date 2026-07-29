@@ -1,5 +1,6 @@
 "use client";
 
+import { Can } from "@/components/auth/Can";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -13,9 +14,11 @@ export default function SubcontractorsPage() {
     <div className="sites-page">
       <div className="sites-page-header">
         <h1>Subcontractors</h1>
-        <Link href="/subcontractors/new" className="button-primary">
+        <Can perm="subcontractor:create">
+          <Link href="/subcontractors/new" className="button-primary">
           + New Subcontractor
         </Link>
+        </Can>
       </div>
 
       {loading && <p>Loading subcontractors...</p>}
